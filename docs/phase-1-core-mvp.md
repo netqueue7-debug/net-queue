@@ -31,14 +31,21 @@ This phase contains the hardest correctness work in the project. Take the concur
   - `GET /api/events` and `GET /api/events/:id` are admin-only for now (not yet in `architecture.md`'s "Member" API section) — no location-gating serializer exists yet, so exposing these to members now would risk leaking `exact_location` pre-reveal. The "Location gating" and "Member event pages" tasks add the member-facing read path.
   - All 9 cases (create/list/edit/cancel × admin/member/unauthenticated, plus "cancel doesn't delete the row") verified against real Postgres in `tests/events-crud-route.test.ts`.
 
-- [ ] **Signup-open gating.** `signup_opens_at` enforced server-side inside the transaction. Before it opens, the event is visible with a countdown but the RSVP endpoint rejects with `SignupNotOpenError`.
+- [x] **Signup-open gating.** `signup_opens_at` enforced server-side inside the transaction. Before it opens, the event is visible with a countdown but the RSVP endpoint rejects with `SignupNotOpenError`.
   - *Check:* a request one second before open is rejected; one second after succeeds. Client clock manipulation has no effect.
+  - Built as the first validation in the full `createRsvp` service (`lib/rsvp/rsvp.ts`) — all validation runs inside `withEventLock`'s transaction per `architecture.md`'s critical-section pseudocode, using `new Date()` server-side only, never a client-supplied timestamp (the route accepts none). Verified with real timing in `tests/signup-open-gating.test.ts`: rejected 1s before open, accepted 1s after, and a spoofed `now` in the request body has zero effect.
 
-- [ ] **Location gating in the serializer.** `lib/serializers/event.ts` decides what location fields ship to the client based on policy + current time + viewer role (admins always see full). The exact location must be **absent from the JSON**, not hidden in CSS.
+- [x] **Location gating in the serializer.** `lib/serializers/event.ts` decides what location fields ship to the client based on policy + current time + viewer role (admins always see full). The exact location must be **absent from the JSON**, not hidden in CSS.
   - *Check:* an integration test asserts the raw API response for a pre-reveal event contains no substring of `exact_location`.
+  - `exactLocation` is `null` (not omitted, not present-but-empty) until reveal — the secret string itself is simply never in the payload, satisfying "absent from the JSON" regardless of how the key is handled.
+  - `day_of`/`hidden`'s "local midnight of the event's day" is computed timezone- and DST-aware from `timezone` + `startsAt` alone (no date library — `Intl.DateTimeFormat` round-tripping). Verified against both an EDT (summer) and EST (winter) date to prove the DST math is actually correct, not just untested.
+  - `hidden` differs from `day_of`: `day_of` shows `generalLocation` + a `locationRevealsAt` countdown pre-reveal; `hidden` shows nothing at all (not even `generalLocation`) until the same day-of moment.
+  - This task only had a route to wire the serializer into once "Member event pages" exists, so the check runs directly against `serializeEvent`'s output (what an API response body would contain) in `tests/serialize-event.test.ts`, including the literal "no substring of the secret value" assertion.
 
-- [ ] **RSVP create.** Inside `withEventLock`: verify signup open, event not canceled, user not banned, user has accepted current waiver, no existing active RSVP. Assign `queue_position` from `MAX + 1` under the lock. Reusing a previously canceled RSVP → create a **new** row at the back of the queue (re-signing up means going to the end; state this in the UI).
-  - *Check:* concurrency test below.
+- [x] **RSVP create.** Inside `withEventLock`: verify signup open, event not canceled, user not banned, user has accepted current waiver, no existing active RSVP. Assign `queue_position` from `MAX + 1` under the lock. Reusing a previously canceled RSVP → create a **new** row at the back of the queue (re-signing up means going to the end; state this in the UI).
+  - *Check:* concurrency test below (the phase's 50-concurrent-RSVP exit criterion — run last, once every mutation exists).
+  - `lib/rsvp/rsvp.ts` `createRsvp` + `POST /api/events/:id/rsvp`. Each business rule (canceled event, banned user, waiver not accepted, double-active-RSVP, re-signup creates a new row at the correct back-of-queue position) has its own real-Postgres test in `tests/rsvp-create.test.ts`, ahead of the full concurrency exit criterion.
+  - Note for future UI work: re-signing up after a cancellation goes to the *back* of the queue, not back to the original position — the member-facing copy needs to say this explicitly so it isn't a surprise.
 
 - [ ] **RSVP cancel.** Sets `status: canceled`, `canceled_at`; row leaves the queue; boundary recomputes; anyone promoted is flagged for notification. No cutoff — allowed until event start (`policy.md#4`).
   - *Check:* with a full going list and a waitlist, canceling the first going RSVP promotes exactly the first waitlisted party and no one else.
