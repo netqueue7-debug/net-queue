@@ -45,6 +45,8 @@ Read alongside: `docs/architecture.md` (data model), `docs/conventions.md`.
 
 - [ ] **Deploy.** Vercel + managed Postgres (Neon or Supabase). Migrations run on deploy. Secrets set. A staging environment separate from production.
   - *Check:* full login flow works on the deployed URL from a real phone.
+  - **QA/staging: done.** `qa` branch → Vercel Preview → `qa.netqueue.org`, pointed at the existing `dev` Neon branch (kept separate from any future production data by design, per your call). `vercel-build` runs `prisma migrate deploy` on every deploy. Twilio/Turnstile creds are shared with production (per your call — no per-environment cost/config reason to split them); `DATABASE_URL` is the only env var that differs by environment.
+  - **Production: not started, deferred at your request.** Needs its own Neon branch (or the `main` git branch could just point at the same `dev` data if you decide not to bother splitting further — your call when you get there), Production-scoped env vars (`DATABASE_URL` is the only one missing — Twilio/Turnstile are already set for Production too), and a real deploy of `main` (currently errored from before secrets existed).
 
 ## Exit criteria
 
