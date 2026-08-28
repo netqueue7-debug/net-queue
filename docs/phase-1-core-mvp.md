@@ -25,8 +25,11 @@ This phase contains the hardest correctness work in the project. Take the concur
   - Notifications: no DB table for this yet (none exists until Phase 3's `notifications/`), so "enqueue" is an in-memory list built during the transaction, dispatched (currently a `console.log` no-op) only after commit — satisfies "a Twilio failure must never roll back a queue mutation" by construction, since dispatch runs entirely outside the transaction.
   - Verified the concurrency test actually has teeth, not just luck: temporarily removed the `FOR UPDATE` lock and reran it 5x — failed 2/5 (real race). Restored the lock, reran 5x — passed every time.
 
-- [ ] **Admin: single-event CRUD.** Create/edit/cancel one-off events. Fields: title, description, start, end, timezone, capacity (nullable), `max_guests_per_rsvp` (nullable), `signup_opens_at`, `general_location`, `exact_location`, `location_reveal_policy`. Deleting = `status: canceled`, not a row delete.
+- [x] **Admin: single-event CRUD.** Create/edit/cancel one-off events. Fields: title, description, start, end, timezone, capacity (nullable), `max_guests_per_rsvp` (nullable), `signup_opens_at`, `general_location`, `exact_location`, `location_reveal_policy`. Deleting = `status: canceled`, not a row delete.
   - *Check:* admin can create an event and see it listed; a member cannot reach any of these endpoints.
+  - `lib/events/events.ts` + `app/api/events/`. `updateEvent` routes capacity changes through `withEventLock` (capacity is the one field that affects the RSVP queue boundary) and everything else through a plain update — sets up "Capacity change semantics" below to need no new mutation path, just tests.
+  - `GET /api/events` and `GET /api/events/:id` are admin-only for now (not yet in `architecture.md`'s "Member" API section) — no location-gating serializer exists yet, so exposing these to members now would risk leaking `exact_location` pre-reveal. The "Location gating" and "Member event pages" tasks add the member-facing read path.
+  - All 9 cases (create/list/edit/cancel × admin/member/unauthenticated, plus "cancel doesn't delete the row") verified against real Postgres in `tests/events-crud-route.test.ts`.
 
 - [ ] **Signup-open gating.** `signup_opens_at` enforced server-side inside the transaction. Before it opens, the event is visible with a countdown but the RSVP endpoint rejects with `SignupNotOpenError`.
   - *Check:* a request one second before open is rejected; one second after succeeds. Client clock manipulation has no effect.
