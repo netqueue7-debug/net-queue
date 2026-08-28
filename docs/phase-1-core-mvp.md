@@ -10,14 +10,20 @@ This phase contains the hardest correctness work in the project. Take the concur
 
 ## Tasks
 
-- [ ] **Schema: events + rsvps.** Per `architecture.md`. Include `max_guests_per_rsvp` and all location fields now even though guests arrive in Phase 2 — avoids a second migration on a live table. Index `(event_id, queue_position)` and `(event_id, status)`.
+- [x] **Schema: events + rsvps.** Per `architecture.md`. Include `max_guests_per_rsvp` and all location fields now even though guests arrive in Phase 2 — avoids a second migration on a live table. Index `(event_id, queue_position)` and `(event_id, status)`.
   - *Check:* migration applies clean; unique `(event_id, user_id)` rejects a double RSVP at the DB level.
+  - Resolved an ambiguity between this doc and `architecture.md`: a flat `unique(event_id, user_id)` would make "cancel then re-signup creates a new row" (this doc, RSVP-create task) impossible. Went with a **partial unique index, active rows only** (hand-added SQL — Prisma's schema DSL can't express `WHERE`) — rejects a real double-RSVP while still allowing a new row once the prior one is canceled. Verified both halves in `tests/events-rsvps-schema.test.ts`.
+  - `EventLog.eventId` and `Event.seriesId` are still forward-references (no FK on `seriesId` — `event_series` doesn't exist until Phase 2); `EventLog.eventId` now has a real FK since `events` exists.
 
-- [ ] **Seat math (pure function).** `computeDerivedStatuses(rsvps, capacity)` → map of rsvp id → `going | waitlist`. Implements atomic parties and **no skipping** (`policy.md#1`). Capacity `null` → everyone going. In Phase 1 every party is size 1, but write it party-aware now so Phase 2 is a data change, not a rewrite.
+- [x] **Seat math (pure function).** `computeDerivedStatuses(rsvps, capacity)` → map of rsvp id → `going | waitlist`. Implements atomic parties and **no skipping** (`policy.md#1`). Capacity `null` → everyone going. In Phase 1 every party is size 1, but write it party-aware now so Phase 2 is a data change, not a rewrite.
   - *Check:* table-driven unit tests covering capacity 0 / null / exact fit / party larger than remaining seats / all-canceled. This is the highest-value test file in the repo.
+  - `lib/rsvp/seat-math.ts` — takes a `seats` field per RSVP rather than counting guests itself, so Phase 2 only needs to change what callers pass in, not this function. Caller is responsible for passing only active RSVPs (canceled rows aren't part of the queue). 7 table-driven cases in `tests/seat-math.test.ts`, including `policy.md#1`'s exact worked example verbatim.
 
-- [ ] **`withEventLock` helper.** The transaction wrapper from `architecture.md#the-critical-section`: opens transaction, takes `FOR UPDATE` on the event row, snapshots derived statuses, runs callback, recomputes, diffs, enqueues status-change notifications, commits. Every queue mutation goes through it.
+- [x] **`withEventLock` helper.** The transaction wrapper from `architecture.md#the-critical-section`: opens transaction, takes `FOR UPDATE` on the event row, snapshots derived statuses, runs callback, recomputes, diffs, enqueues status-change notifications, commits. Every queue mutation goes through it.
   - *Check:* a test proving two concurrent calls serialize rather than interleave.
+  - `lib/rsvp/with-event-lock.ts`. Notification diff only fires for RSVPs active in *both* the before and after snapshot with a changed status — a brand-new signup or a just-canceled RSVP has no real prior/subsequent status to "cross," so those are excluded by construction, not filtered after the fact.
+  - Notifications: no DB table for this yet (none exists until Phase 3's `notifications/`), so "enqueue" is an in-memory list built during the transaction, dispatched (currently a `console.log` no-op) only after commit — satisfies "a Twilio failure must never roll back a queue mutation" by construction, since dispatch runs entirely outside the transaction.
+  - Verified the concurrency test actually has teeth, not just luck: temporarily removed the `FOR UPDATE` lock and reran it 5x — failed 2/5 (real race). Restored the lock, reran 5x — passed every time.
 
 - [ ] **Admin: single-event CRUD.** Create/edit/cancel one-off events. Fields: title, description, start, end, timezone, capacity (nullable), `max_guests_per_rsvp` (nullable), `signup_opens_at`, `general_location`, `exact_location`, `location_reveal_policy`. Deleting = `status: canceled`, not a row delete.
   - *Check:* admin can create an event and see it listed; a member cannot reach any of these endpoints.
