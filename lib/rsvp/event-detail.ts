@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { computeDerivedStatuses, type DerivedStatus } from "./seat-math";
+import { listUpcomingEvents } from "@/lib/events/events";
 import { serializeEvent, type SerializedEvent } from "@/lib/serializers/event";
 
 export interface RsvpListItem {
@@ -64,4 +65,37 @@ export async function getEventDetail(
     canceled: canceledItems,
     yourRsvp,
   };
+}
+
+export interface EventListItem {
+  event: SerializedEvent;
+  seatsRemaining: number | null;
+  yourStatus: DerivedStatus | null;
+}
+
+export async function listEventsForMember(
+  viewer: { id: string; role: "member" | "admin" },
+): Promise<EventListItem[]> {
+  const events = await listUpcomingEvents();
+
+  return Promise.all(
+    events.map(async (event) => {
+      const active = await prisma.rsvp.findMany({
+        where: { eventId: event.id, status: "active" },
+        select: { id: true, userId: true, queuePosition: true },
+      });
+      const statuses = computeDerivedStatuses(
+        active.map((r) => ({ id: r.id, queuePosition: r.queuePosition, seats: 1 })),
+        event.capacity,
+      );
+
+      const goingCount = active.filter((r) => statuses.get(r.id) === "going").length;
+      const seatsRemaining = event.capacity === null ? null : Math.max(0, event.capacity - goingCount);
+
+      const yours = active.find((r) => r.userId === viewer.id);
+      const yourStatus = yours ? (statuses.get(yours.id) ?? null) : null;
+
+      return { event: serializeEvent(event, viewer.role), seatsRemaining, yourStatus };
+    }),
+  );
 }
