@@ -1,0 +1,23 @@
+import { config } from "dotenv";
+config({ path: ".env.local" });
+
+// Cleans up by phone, not just the one eventId this run created — a
+// previous run that got killed mid-test (e.g. by a Playwright timeout)
+// can leave orphaned events behind, since try/finally doesn't reliably
+// run when the whole test process is torn down externally.
+async function main() {
+  const [, , memberPhone, adminPhone] = process.argv;
+  const { prisma } = await import("../../lib/db");
+
+  const users = await prisma.user.findMany({ where: { phone: { in: [memberPhone, adminPhone] } } });
+  const userIds = users.map((u) => u.id);
+
+  await prisma.eventLog.deleteMany({ where: { actorUserId: { in: userIds } } });
+  await prisma.rsvp.deleteMany({ where: { userId: { in: userIds } } });
+  await prisma.event.deleteMany({ where: { createdBy: { in: userIds } } });
+  await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+
+  await prisma.$disconnect();
+}
+
+main();
