@@ -76,13 +76,15 @@ This phase contains the hardest correctness work in the project. Take the concur
 
 ## Exit criterion (hard gate)
 
-A load script fires **50 concurrent RSVPs** at a capacity-24 event at the instant signup opens. Assertions, all of which must hold:
+**[x] Passed.** A load script fires **50 concurrent RSVPs** at a capacity-24 event at the instant signup opens. Assertions, all of which must hold:
 
 1. Exactly 24 people are "going," 26 are waitlisted.
 2. `queue_position` values are unique and contiguous.
 3. Ordering matches server receipt order.
 4. No user appears twice.
 5. No request returns a 500.
+
+`npm run load-test:rsvp` (`scripts/load-test-rsvp.ts`). First run **failed** for real — not a queue-logic bug, but a connection-pool/transaction-timeout limitation that would genuinely bite at this exact worst case: with pg's default pool size (10) and Prisma's default transaction `timeout` (5s), most of the 50 requests errored with `Unable to start a transaction in the given time`, because every RSVP attempt holds a DB connection *while queued behind `withEventLock`'s row lock*, not just while doing real work — so a small pool starves long before the lock semantics even come into play. Fixed by raising the `pg` pool size to 60 (`lib/db.ts`) and `withEventLock`'s transaction `maxWait`/`timeout` to 10s/30s (`lib/rsvp/with-event-lock.ts`) — a transaction waiting near the back of a 50-deep lock queue isn't hung, it's the lock working as designed, and the timeout needs room for that. Reran twice after the fix: 50/50 succeeded both times, exactly 24 going / 26 waitlisted, all 50 `queue_position` values unique and contiguous (1–50), no user twice, zero errors.
 
 Then run one real volleyball night on it. Nothing ships to Phase 2 until a real night has run.
 
