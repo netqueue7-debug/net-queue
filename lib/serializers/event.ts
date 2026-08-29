@@ -11,6 +11,8 @@ export interface SerializedEvent {
   maxGuestsPerRsvp: number | null;
   signupOpensAt: string;
   status: string;
+  locationRevealPolicy: string;
+  locationRevealHours: number | null;
   generalLocation: string | null;
   exactLocation: string | null;
   locationRevealsAt: string | null;
@@ -84,6 +86,8 @@ export function serializeEvent(
     maxGuestsPerRsvp: event.maxGuestsPerRsvp,
     signupOpensAt: event.signupOpensAt.toISOString(),
     status: event.status,
+    locationRevealPolicy: event.locationRevealPolicy,
+    locationRevealHours: event.locationRevealHours,
   };
 
   if (viewerRole === "admin") {

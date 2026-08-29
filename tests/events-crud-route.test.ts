@@ -67,17 +67,17 @@ describe("admin single-event CRUD", () => {
     expect(body.events.some((e: { id: string }) => e.id === eventId)).toBe(true);
   });
 
-  it("a member cannot list events", async () => {
-    const res = await listRoute(req("http://localhost/api/events", { token: memberToken }));
-    expect(res.status).toBe(403);
-  });
+  it("a member can list and view events (read access is member-facing; write is admin-only)", async () => {
+    const listRes = await listRoute(req("http://localhost/api/events", { token: memberToken }));
+    expect(listRes.status).toBe(200);
 
-  it("a member cannot fetch, edit, or cancel a specific event", async () => {
     const getRes = await getRoute(req(`http://localhost/api/events/${eventId}`, { token: memberToken }), {
       params: Promise.resolve({ id: eventId }),
     });
-    expect(getRes.status).toBe(403);
+    expect(getRes.status).toBe(200);
+  });
 
+  it("a member cannot edit or cancel a specific event", async () => {
     const patchRes = await patchRoute(
       req(`http://localhost/api/events/${eventId}`, { method: "PATCH", body: { title: "Hacked" }, token: memberToken }),
       { params: Promise.resolve({ id: eventId }) },

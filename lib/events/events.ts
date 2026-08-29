@@ -21,8 +21,14 @@ export function createEvent(createdBy: string, input: EventFields): Promise<Even
   return prisma.event.create({ data: { ...input, createdBy } });
 }
 
+// Admin management listing: every event regardless of status.
 export function listEvents(): Promise<Event[]> {
   return prisma.event.findMany({ orderBy: { startsAt: "asc" } });
+}
+
+// Member-facing listing: not-canceled events, ordered soonest-first.
+export function listUpcomingEvents(): Promise<Event[]> {
+  return prisma.event.findMany({ where: { status: "scheduled" }, orderBy: { startsAt: "asc" } });
 }
 
 export function getEvent(id: string): Promise<Event | null> {

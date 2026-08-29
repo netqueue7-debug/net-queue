@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@/lib/generated/prisma/client";
-import { requireAdmin, ForbiddenError, UnauthorizedError } from "@/lib/auth/session";
+import { requireAdmin, requireMember, ForbiddenError, UnauthorizedError } from "@/lib/auth/session";
 import { updateEventSchema } from "@/lib/events/schema";
-import { cancelEvent, getEvent, updateEvent } from "@/lib/events/events";
+import { cancelEvent, updateEvent } from "@/lib/events/events";
+import { getEventDetail } from "@/lib/rsvp/event-detail";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -10,19 +11,23 @@ function isNotFoundError(e: unknown): boolean {
   return e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2025";
 }
 
+// Any authenticated member (or admin) can view an event's detail page —
+// going/waitlist/canceled lists, their own status, and location gated by
+// serializeEvent. Phone numbers are only included in the RSVP lists for
+// admin viewers (architecture.md#cross-cutting-concerns).
 export async function GET(request: NextRequest, { params }: RouteContext) {
+  let user;
   try {
-    await requireAdmin(request);
+    user = await requireMember(request);
   } catch (e) {
     if (e instanceof UnauthorizedError) return NextResponse.json({ error: e.message }, { status: 401 });
-    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
     throw e;
   }
 
   const { id } = await params;
-  const event = await getEvent(id);
-  if (!event) return NextResponse.json({ error: "Event not found." }, { status: 404 });
-  return NextResponse.json({ event });
+  const detail = await getEventDetail(id, user);
+  if (!detail) return NextResponse.json({ error: "Event not found." }, { status: 404 });
+  return NextResponse.json(detail);
 }
 
 export async function PATCH(request: NextRequest, { params }: RouteContext) {
