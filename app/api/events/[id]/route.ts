@@ -26,8 +26,9 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
 }
 
 export async function PATCH(request: NextRequest, { params }: RouteContext) {
+  let admin;
   try {
-    await requireAdmin(request);
+    admin = await requireAdmin(request);
   } catch (e) {
     if (e instanceof UnauthorizedError) return NextResponse.json({ error: e.message }, { status: 401 });
     if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
@@ -41,7 +42,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 
   const { id } = await params;
   try {
-    const event = await updateEvent(id, parsed.data);
+    const event = await updateEvent(id, parsed.data, admin.id);
     return NextResponse.json({ event });
   } catch (e) {
     if (isNotFoundError(e)) return NextResponse.json({ error: "Event not found." }, { status: 404 });

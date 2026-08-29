@@ -47,11 +47,14 @@ This phase contains the hardest correctness work in the project. Take the concur
   - `lib/rsvp/rsvp.ts` `createRsvp` + `POST /api/events/:id/rsvp`. Each business rule (canceled event, banned user, waiver not accepted, double-active-RSVP, re-signup creates a new row at the correct back-of-queue position) has its own real-Postgres test in `tests/rsvp-create.test.ts`, ahead of the full concurrency exit criterion.
   - Note for future UI work: re-signing up after a cancellation goes to the *back* of the queue, not back to the original position — the member-facing copy needs to say this explicitly so it isn't a surprise.
 
-- [ ] **RSVP cancel.** Sets `status: canceled`, `canceled_at`; row leaves the queue; boundary recomputes; anyone promoted is flagged for notification. No cutoff — allowed until event start (`policy.md#4`).
+- [x] **RSVP cancel.** Sets `status: canceled`, `canceled_at`; row leaves the queue; boundary recomputes; anyone promoted is flagged for notification. No cutoff — allowed until event start (`policy.md#4`).
   - *Check:* with a full going list and a waitlist, canceling the first going RSVP promotes exactly the first waitlisted party and no one else.
+  - `lib/rsvp/rsvp.ts` `cancelRsvp` + `DELETE /api/events/:id/rsvp`. No signup-cutoff check exists (or is needed) here — `policy.md#4` says cancellation is allowed anytime up to and including event start, so there's nothing to gate.
+  - Tested with 5 users at capacity 2 (2 going, 3 waitlisted): canceling position 1 promotes exactly position 3 (first waitlisted), leaving positions 4 and 5 still waitlisted — proves the promotion doesn't over-promote past the first opening.
 
-- [ ] **Capacity change semantics.** `PATCH /events/:id` with a new capacity runs through `withEventLock`. Raising promotes from the top of the waitlist; lowering demotes from the bottom of going; `null` promotes everyone. No rows move — only the boundary.
+- [x] **Capacity change semantics.** `PATCH /events/:id` with a new capacity runs through `withEventLock`. Raising promotes from the top of the waitlist; lowering demotes from the bottom of going; `null` promotes everyone. No rows move — only the boundary.
   - *Check:* a test asserting exact membership before/after for raise, lower, and uncap.
+  - No dedicated promote/demote code exists — this "just works" because `withEventLock` re-runs the same seat-math walk against the new capacity value; the before/after diff (already built for notifications) is exactly the promotion/demotion set. Verified exact membership with 5 users at capacity 2 → 4 → 1 → null in `tests/capacity-change.test.ts`.
 
 - [ ] **Member event pages.** List of upcoming events (status, your RSVP state, seats remaining or "waitlist only"). Detail page showing going / waitlist / canceled lists by display name, your position if waitlisted, countdown to signup open, and location per gating policy. RSVP and cancel buttons.
   - *Check:* Playwright happy path — member logs in, opens event, RSVPs, sees themselves in going, cancels, disappears from going.
@@ -59,8 +62,11 @@ This phase contains the hardest correctness work in the project. Take the concur
 - [ ] **Admin event view.** Same detail page plus full location, phone numbers, and the ability to remove a member's RSVP (goes through `withEventLock` like any cancellation).
   - *Check:* admin-removed RSVP triggers the same promotion behavior as a self-cancel.
 
-- [ ] **Event log writes.** Every queue mutation appends to `event_log` with actor, action, and payload.
+- [x] **Event log writes.** Every queue mutation appends to `event_log` with actor, action, and payload.
   - *Check:* a signup → cancel → capacity change sequence produces three readable log rows.
+  - Each mutation (`createRsvp`, `cancelRsvp`, `updateEvent`'s capacity path) writes its own `event_log` row inside its existing `withEventLock` transaction — `withEventLock` itself stays generic and doesn't need to know action/actor semantics.
+  - `cancelRsvp` now takes an optional `actorUserId` (defaults to the target user — a self-cancel), so admin-removal in the "Admin event view" task below can reuse it unchanged with the admin as actor instead.
+  - Plain (non-capacity) event edits are intentionally **not** logged here — they don't touch the queue, and the task's scope is "every queue mutation," not every edit.
 
 ## Exit criterion (hard gate)
 

@@ -35,9 +35,20 @@ export function getEvent(id: string): Promise<Event | null> {
 // other field is a plain update. If both change in the same call, the
 // non-capacity fields are applied inside the same lock/transaction too,
 // since withEventLock's callback has a transaction client anyway.
-export async function updateEvent(id: string, input: Partial<EventFields>): Promise<Event> {
+export async function updateEvent(id: string, input: Partial<EventFields>, actorUserId?: string): Promise<Event> {
   if ("capacity" in input) {
-    return withEventLock(id, (tx) => tx.event.update({ where: { id }, data: input }));
+    return withEventLock(id, async (tx, before) => {
+      const updated = await tx.event.update({ where: { id }, data: input });
+      await tx.eventLog.create({
+        data: {
+          actorUserId,
+          eventId: id,
+          action: "event.capacity_changed",
+          payload: { from: before.capacity, to: updated.capacity },
+        },
+      });
+      return updated;
+    });
   }
   return prisma.event.update({ where: { id }, data: input });
 }
