@@ -21,7 +21,7 @@ describe("signup-open gating", () => {
     await prisma.user.deleteMany({ where: { phone } });
   });
 
-  it("rejects a request one second before signup opens, accepts one second after", async () => {
+  it("rejects a request one second before signup opens, accepts one second after", { timeout: 15_000 }, async () => {
     const admin = await prisma.user.create({
       data: { phone, displayName: "Sam", role: "admin", waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
     });

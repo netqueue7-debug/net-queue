@@ -3,6 +3,13 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { EventDetail } from "@/lib/rsvp/event-detail";
+import { EventForm, type EventFormBody } from "@/app/admin/events/event-form";
+
+function toDatetimeLocal(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 export function EventDetailClient({
   detail,
@@ -16,6 +23,7 @@ export function EventDetailClient({
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   async function withLoading(fn: () => Promise<Response>) {
     setError(null);
@@ -44,6 +52,25 @@ export function EventDetailClient({
       }),
     );
 
+  async function handleCancelEvent() {
+    if (!window.confirm("Cancel this event? This does not delete it, but members will see it as canceled.")) return;
+    await withLoading(() => fetch(`/api/events/${eventId}`, { method: "DELETE" }));
+  }
+
+  async function handleEditSubmit(body: EventFormBody) {
+    const res = await fetch(`/api/events/${eventId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}));
+      return { ok: false, error: b.error ?? "Failed to save changes." };
+    }
+    router.refresh();
+    return { ok: true };
+  }
+
   const { event, going, waitlist, canceled, yourRsvp } = detail;
   const signupOpen = new Date() >= new Date(event.signupOpensAt);
   const hasActiveRsvp = yourRsvp.status === "going" || yourRsvp.status === "waitlist";
@@ -71,6 +98,46 @@ export function EventDetailClient({
           </p>
         ) : null}
       </div>
+
+      {viewerRole === "admin" && (
+        <div className="flex flex-col gap-3 rounded border border-zinc-300 p-4 dark:border-zinc-700">
+          <div className="flex items-center justify-between">
+            <h2 className="font-medium">Admin controls</h2>
+            <div className="flex gap-3">
+              <button onClick={() => setEditing((v) => !v)} className="text-sm underline">
+                {editing ? "Cancel editing" : "Edit event"}
+              </button>
+              {event.status !== "canceled" && (
+                <button onClick={handleCancelEvent} disabled={loading} className="text-sm text-red-600 underline disabled:opacity-50">
+                  Cancel event
+                </button>
+              )}
+            </div>
+          </div>
+
+          {editing && (
+            <EventForm
+              submitLabel="Save changes"
+              onSubmit={handleEditSubmit}
+              onSuccess={() => setEditing(false)}
+              initialValues={{
+                title: event.title,
+                description: event.description ?? "",
+                startsAt: toDatetimeLocal(event.startsAt),
+                endsAt: toDatetimeLocal(event.endsAt),
+                signupOpensAt: toDatetimeLocal(event.signupOpensAt),
+                timezone: event.timezone,
+                capacity: event.capacity?.toString() ?? "",
+                maxGuestsPerRsvp: event.maxGuestsPerRsvp?.toString() ?? "",
+                generalLocation: event.generalLocation ?? "",
+                exactLocation: event.exactLocation ?? "",
+                locationRevealPolicy: event.locationRevealPolicy,
+                locationRevealHours: event.locationRevealHours?.toString() ?? "",
+              }}
+            />
+          )}
+        </div>
+      )}
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
