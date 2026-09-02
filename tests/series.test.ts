@@ -259,4 +259,80 @@ describe("event series", () => {
     });
     expect(notification).not.toBeNull();
   });
+
+  it("recurStartsAt controls the earliest materialized instance, not just recurUntil", async () => {
+    const timezone = "America/New_York";
+    const recurStartsAt = daysFromNow(3, timezone);
+    const recurUntil = daysFromNow(6, timezone);
+
+    const { series, eventsCreated } = await createSeries(adminId, {
+      groupId,
+      title: "Delayed Start Series",
+      description: null,
+      weekdays: [0, 1, 2, 3, 4, 5, 6], // every day, so the window is fully populated
+      startTime: "18:00",
+      endTime: "19:00",
+      timezone,
+      recurStartsAt,
+      recurUntil,
+      signupOpensRule: "immediately",
+      signupOpensDaysBefore: null,
+      capacity: 4,
+      maxGuestsPerRsvp: null,
+      waiverRequired: false,
+      generalLocation: null,
+      exactLocation: null,
+      googleMapsUrl: null,
+      appleMapsUrl: null,
+      locationRevealPolicy: "always",
+      locationRevealHours: null,
+    });
+
+    expect(eventsCreated).toBeGreaterThan(0);
+
+    const instances = await prisma.event.findMany({ where: { seriesId: series.id }, orderBy: { startsAt: "asc" } });
+    const localDate = (instant: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(instant);
+
+    // Nothing before recurStartsAt, nothing after recurUntil.
+    for (const instance of instances) {
+      const date = localDate(instance.startsAt);
+      expect(date >= recurStartsAt).toBe(true);
+      expect(date <= recurUntil).toBe(true);
+    }
+    // The earliest instance actually lands on recurStartsAt itself, not
+    // sometime later in the window (every weekday is included, so it must).
+    expect(localDate(instances[0].startsAt)).toBe(recurStartsAt);
+  });
+
+  it("createSeries defaults recurStartsAt to today when omitted, matching the previous behavior", async () => {
+    const timezone = "America/New_York";
+    const { series, eventsCreated } = await createSeries(adminId, {
+      groupId,
+      title: "Default Start Series",
+      description: null,
+      weekdays: [0, 1, 2, 3, 4, 5, 6],
+      startTime: "18:00",
+      endTime: "19:00",
+      timezone,
+      // recurStartsAt omitted on purpose.
+      recurUntil: daysFromNow(2, timezone),
+      signupOpensRule: "immediately",
+      signupOpensDaysBefore: null,
+      capacity: 4,
+      maxGuestsPerRsvp: null,
+      waiverRequired: false,
+      generalLocation: null,
+      exactLocation: null,
+      googleMapsUrl: null,
+      appleMapsUrl: null,
+      locationRevealPolicy: "always",
+      locationRevealHours: null,
+    });
+
+    expect(eventsCreated).toBeGreaterThan(0);
+
+    const instances = await prisma.event.findMany({ where: { seriesId: series.id }, orderBy: { startsAt: "asc" } });
+    const localDate = (instant: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(instant);
+    expect(localDate(instances[0].startsAt)).toBe(daysFromNow(0, timezone));
+  });
 });

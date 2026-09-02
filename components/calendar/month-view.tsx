@@ -16,15 +16,21 @@ export function MonthView({
   anchor,
   eventsByDay,
   groupFilter = null,
+  backHref,
 }: {
   anchor: Date;
   eventsByDay: Map<string, EventChip[]>;
   groupFilter?: string | null;
+  // This view's own URL (path + query) — threaded onto each event link as
+  // ?from=... so the event page can offer a "back to calendar" link that
+  // actually returns to this exact view/date/filter, not just "back".
+  backHref: string;
 }) {
   const weeks = monthGridWeeks(anchor);
   const currentMonth = anchor.getMonth();
   const todayKey = dateKey(new Date());
   const groupParam = groupFilter ? `&group=${groupFilter}` : "";
+  const fromParam = `from=${encodeURIComponent(backHref)}`;
 
   return (
     <div className="flex flex-col gap-3">
@@ -59,13 +65,13 @@ export function MonthView({
                   {dayEvents.slice(0, MAX_VISIBLE_PER_DAY).map((e) => (
                     <Link
                       key={e.id}
-                      href={`/events/${e.id}`}
+                      href={`/events/${e.id}?${fromParam}`}
                       className={`block rounded px-1 py-0.5 leading-tight ${GROUP_CHIP_CLASS[groupColorTone(e.groupId)]}`}
                       title={e.groupName ? `${e.title} — ${e.groupName}` : e.title}
                     >
                       <span className="block truncate text-[11px] font-medium">{e.title}</span>
                       <span className="block truncate text-[10px] opacity-80">
-                        {formatTime(e.startsAt)} – {formatTime(e.endsAt)}
+                        {formatTime(e.startsAt, e.timezone)} – {formatTime(e.endsAt, e.timezone)}
                       </span>
                     </Link>
                   ))}

@@ -7,9 +7,18 @@ import type { EventChip } from "@/components/calendar/event-chip";
 
 const WEEKDAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-export function WeekView({ anchor, eventsByDay }: { anchor: Date; eventsByDay: Map<string, EventChip[]> }) {
+export function WeekView({
+  anchor,
+  eventsByDay,
+  backHref,
+}: {
+  anchor: Date;
+  eventsByDay: Map<string, EventChip[]>;
+  backHref: string;
+}) {
   const days = weekDays(anchor);
   const todayKey = dateKey(new Date());
+  const fromParam = `from=${encodeURIComponent(backHref)}`;
 
   return (
     <div className="flex flex-col gap-4">
@@ -29,11 +38,11 @@ export function WeekView({ anchor, eventsByDay }: { anchor: Date; eventsByDay: M
               <ul className="mt-1 flex flex-col gap-1.5">
                 {dayEvents.map((e) => (
                   <li key={e.id}>
-                    <Link href={`/events/${e.id}`} className="block">
+                    <Link href={`/events/${e.id}?${fromParam}`} className="block">
                       <Card className="px-3 py-2 transition-shadow hover:shadow-md">
                         <p className="truncate font-medium">{e.title}</p>
                         <p className="text-xs text-muted">
-                          {formatTime(e.startsAt)} – {formatTime(e.endsAt)}
+                          {formatTime(e.startsAt, e.timezone)} – {formatTime(e.endsAt, e.timezone)}
                         </p>
                         {e.groupName && (
                           <p className="flex items-center gap-1.5 truncate text-xs text-muted">

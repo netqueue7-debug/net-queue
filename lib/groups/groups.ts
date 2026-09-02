@@ -168,7 +168,7 @@ export async function listMyMemberships(userId: string): Promise<MyGroupMembersh
   const memberships = await prisma.groupMembership.findMany({
     where: { userId },
     include: { group: true },
-    orderBy: { joinedAt: "asc" },
+    orderBy: [{ sortOrder: "asc" }, { joinedAt: "asc" }],
   });
 
   const countByGroupId = await getActiveMemberCounts(memberships.map((m) => m.groupId));
@@ -180,6 +180,30 @@ export async function listMyMemberships(userId: string): Promise<MyGroupMembersh
     waiverUpToDate: m.group.waiverVersion === null || m.groupWaiverVersionAccepted === m.group.waiverVersion,
     activeMemberCount: countByGroupId.get(m.groupId) ?? 0,
   }));
+}
+
+// `groupIds` must be exactly the caller's own membership group ids, just
+// reordered — anything missing or extra is rejected rather than silently
+// reconciled, since a partial list would leave stale sortOrder gaps and
+// there's no legitimate client reason to send anything else.
+export async function reorderMyMemberships(userId: string, groupIds: string[]): Promise<void> {
+  const memberships = await prisma.groupMembership.findMany({
+    where: { userId },
+    select: { id: true, groupId: true },
+  });
+
+  const membershipIdByGroupId = new Map(memberships.map((m) => [m.groupId, m.id]));
+  const isExactReorder = groupIds.length === memberships.length && groupIds.every((id) => membershipIdByGroupId.has(id));
+  if (!isExactReorder) throw new MembershipNotFoundError();
+
+  await prisma.$transaction(
+    groupIds.map((groupId, index) =>
+      prisma.groupMembership.update({
+        where: { id: membershipIdByGroupId.get(groupId)! },
+        data: { sortOrder: index },
+      }),
+    ),
+  );
 }
 
 export async function listPendingMemberships(groupId: string) {

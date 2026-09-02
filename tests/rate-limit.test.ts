@@ -10,8 +10,8 @@ describe("OTP rate limiting", () => {
     await prisma.otpSendAttempt.deleteMany({ where: { OR: [{ phone }, { ip }] } });
   });
 
-  it("allows sends under the per-phone limit and blocks the 4th within the window", async () => {
-    for (let i = 0; i < 3; i++) {
+  it("allows sends under the per-phone limit and blocks the 11th within the window", async () => {
+    for (let i = 0; i < 10; i++) {
       await assertOtpSendAllowed(phone, `198.51.100.${i}`);
       await recordOtpSendAttempt(phone, `198.51.100.${i}`);
     }

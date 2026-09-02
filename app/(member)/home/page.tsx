@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
 import { needsOnboarding } from "@/lib/auth/onboarding";
 import { listEventsForMember } from "@/lib/rsvp/event-detail";
+import { formatTime } from "@/lib/format-datetime";
 import { listMyMemberships } from "@/lib/groups/groups";
 import { countUnreadNotifications } from "@/lib/notifications/notifications";
 import { getDefaultAdminGroupId } from "@/lib/groups/authz";
@@ -97,9 +98,9 @@ export default async function MemberHomePage() {
         <ul className="flex flex-col gap-3">
           {upcoming.map(({ event, seatsRemaining, yourStatus }) => {
             const starts = new Date(event.startsAt);
-            const month = starts.toLocaleDateString(undefined, { month: "short" }).toUpperCase();
-            const day = starts.getDate();
-            const time = starts.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+            const month = starts.toLocaleDateString(undefined, { month: "short", timeZone: event.timezone }).toUpperCase();
+            const day = Number(starts.toLocaleDateString(undefined, { day: "numeric", timeZone: event.timezone }));
+            const time = formatTime(starts, event.timezone);
             const seatsText = seatsRemaining === null ? "Unlimited seats" : seatsRemaining > 0 ? `${seatsRemaining} seats left` : "Waitlist only";
 
             return (

@@ -28,6 +28,9 @@ export interface RsvpListItem {
 
 export interface EventDetail {
   event: SerializedEvent;
+  // Which group this event belongs to — shown at the top of the event
+  // page so a member in several groups isn't left guessing.
+  group: { id: string; name: string };
   going: RsvpListItem[];
   waitlist: RsvpListItem[];
   canceled: RsvpListItem[];
@@ -40,7 +43,7 @@ export interface EventDetail {
 }
 
 export async function getEventDetail(eventId: string, viewer: { id: string }): Promise<EventDetail | null> {
-  const event = await prisma.event.findUnique({ where: { id: eventId } });
+  const event = await prisma.event.findUnique({ where: { id: eventId }, include: { group: { select: { id: true, name: true } } } });
   if (!event) return null;
 
   // No active membership in the event's group (and not a platform admin,
@@ -137,6 +140,7 @@ export async function getEventDetail(eventId: string, viewer: { id: string }): P
 
   return {
     event: serializeEvent(event, viewerRole),
+    group: { id: event.group.id, name: event.group.name },
     going,
     waitlist,
     canceled: canceledItems,

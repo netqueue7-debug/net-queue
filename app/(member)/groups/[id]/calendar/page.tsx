@@ -107,7 +107,7 @@ export default async function GroupCalendarPage({
         <h2 className="text-sm font-medium text-muted">{anchor.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</h2>
       </div>
 
-      <MonthView anchor={anchor} eventsByDay={eventsByDay} />
+      <MonthView anchor={anchor} eventsByDay={eventsByDay} backHref={hrefFor(anchor)} />
     </main>
   );
 }

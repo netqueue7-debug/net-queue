@@ -31,6 +31,7 @@ function syntheticAdminMembership(groupId: string, userId: string): GroupMembers
     groupWaiverAcceptedAt: null,
     groupWaiverVersionAccepted: null,
     joinedAt: new Date(0),
+    sortOrder: 0,
   };
 }
 

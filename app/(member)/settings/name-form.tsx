@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Field, Input } from "@/components/ui/inputs";
+import { Input } from "@/components/ui/inputs";
 import { ErrorText } from "@/components/ui/text";
 
 export function NameForm({ initialDisplayName }: { initialDisplayName: string }) {
@@ -39,19 +39,18 @@ export function NameForm({ initialDisplayName }: { initialDisplayName: string })
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-      <Field label="Display name" htmlFor="displayName">
-        <Input
-          id="displayName"
-          type="text"
-          required
-          maxLength={80}
-          value={displayName}
-          onChange={(e) => {
-            setDisplayName(e.target.value);
-            setSaved(false);
-          }}
-        />
-      </Field>
+      <Input
+        id="displayName"
+        aria-label="Display name"
+        type="text"
+        required
+        maxLength={80}
+        value={displayName}
+        onChange={(e) => {
+          setDisplayName(e.target.value);
+          setSaved(false);
+        }}
+      />
       {error && <ErrorText>{error}</ErrorText>}
       <div className="flex items-center gap-3">
         <Button type="submit" loading={loading} disabled={!displayName.trim() || displayName === initialDisplayName}>

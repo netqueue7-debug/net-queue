@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 
-const PER_PHONE_LIMIT = 3;
+const PER_PHONE_LIMIT = 10;
 const PER_PHONE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 
 const PER_IP_LIMIT = 10;

@@ -45,7 +45,7 @@ export default async function SeriesDetailPage({ params }: { params: Promise<{ i
           <li key={instance.id}>
             <Card className="flex flex-wrap items-center justify-between gap-2 p-3">
               <Link href={`/events/${instance.id}`} className="underline">
-                {formatDateTime(instance.startsAt)}
+                {formatDateTime(instance.startsAt, instance.timezone)}
               </Link>
               <span className="text-sm text-muted">
                 {instance.status}
