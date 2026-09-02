@@ -19,6 +19,8 @@ function baseEvent(overrides: Partial<Event>): Event {
     signupOpensAt: new Date("2026-09-01T00:00:00Z"),
     generalLocation: "Somewhere in Brooklyn",
     exactLocation: SECRET,
+    googleMapsUrl: "https://maps.google.com/?q=secret",
+    appleMapsUrl: "https://maps.apple.com/?q=secret",
     locationRevealPolicy: "always",
     locationRevealHours: null,
     status: "scheduled",
@@ -96,5 +98,30 @@ describe("serializeEvent", () => {
     const result = serializeEvent(event, "member", new Date("2026-09-15T20:59:59Z"));
     const raw = JSON.stringify(result);
     expect(raw.includes(SECRET)).toBe(false);
+  });
+
+  it("map links are gated exactly like exactLocation — hidden before reveal, present after", () => {
+    const event = baseEvent({ locationRevealPolicy: "hours_before", locationRevealHours: 2 });
+    const before = serializeEvent(event, "member", new Date("2026-09-15T20:59:59Z"));
+    expect(before.googleMapsUrl).toBeNull();
+    expect(before.appleMapsUrl).toBeNull();
+
+    const after = serializeEvent(event, "member", new Date("2026-09-15T21:00:01Z"));
+    expect(after.googleMapsUrl).toBe("https://maps.google.com/?q=secret");
+    expect(after.appleMapsUrl).toBe("https://maps.apple.com/?q=secret");
+  });
+
+  it("map links are null when not set, even after reveal", () => {
+    const event = baseEvent({ locationRevealPolicy: "always", googleMapsUrl: null, appleMapsUrl: null });
+    const result = serializeEvent(event, "member", new Date());
+    expect(result.googleMapsUrl).toBeNull();
+    expect(result.appleMapsUrl).toBeNull();
+  });
+
+  it("admin always sees map links, regardless of policy or time", () => {
+    const event = baseEvent({ locationRevealPolicy: "hidden" });
+    const result = serializeEvent(event, "admin", new Date("2020-01-01T00:00:00Z"));
+    expect(result.googleMapsUrl).toBe("https://maps.google.com/?q=secret");
+    expect(result.appleMapsUrl).toBe("https://maps.apple.com/?q=secret");
   });
 });

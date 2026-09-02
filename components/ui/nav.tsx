@@ -1,0 +1,66 @@
+import Link from "next/link";
+import { getSession } from "@/lib/auth/session";
+import { needsOnboarding } from "@/lib/auth/onboarding";
+import { countUnreadNotifications } from "@/lib/notifications/notifications";
+import { getDefaultAdminGroupId } from "@/lib/groups/authz";
+import { CalendarIcon, UsersIcon, BellIcon, ShieldIcon } from "./icons";
+
+const linkClass =
+  "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium text-muted transition-colors hover:bg-accent/8 hover:text-foreground";
+
+export async function Nav() {
+  const user = await getSession();
+  if (!user || needsOnboarding(user)) return null;
+
+  const [unreadCount, adminGroupId] = await Promise.all([countUnreadNotifications(user.id), getDefaultAdminGroupId(user.id)]);
+  const showAdmin = user.role === "admin" || adminGroupId !== null;
+  const initial = (user.displayName ?? "?").trim().charAt(0).toUpperCase();
+
+  return (
+    <header className="sticky top-0 z-40 border-b border-border bg-background/80 backdrop-blur-md">
+      <nav className="mx-auto flex w-full max-w-4xl items-center justify-between gap-4 overflow-x-auto px-4 py-2.5 sm:px-6">
+        <Link href="/home" className="flex flex-shrink-0 items-center gap-2 font-semibold tracking-tight">
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent text-sm font-bold text-accent-foreground">N</span>
+          <span className="hidden sm:inline">NetQueue</span>
+        </Link>
+        <div className="flex items-center gap-1 whitespace-nowrap">
+          <Link href="/events" className={linkClass}>
+            <CalendarIcon width={16} height={16} />
+            <span className="hidden sm:inline">Events</span>
+          </Link>
+          <Link href="/groups" className={linkClass}>
+            <UsersIcon width={16} height={16} />
+            <span className="hidden sm:inline">Groups</span>
+          </Link>
+          <Link href="/notifications" className={`${linkClass} relative`}>
+            <BellIcon width={16} height={16} />
+            <span className="hidden sm:inline">Notifications</span>
+            {unreadCount > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-semibold text-white sm:static sm:ml-0.5">
+                {unreadCount > 9 ? "9+" : unreadCount}
+              </span>
+            )}
+          </Link>
+          {showAdmin && (
+            <Link href="/admin" className={linkClass}>
+              <ShieldIcon width={16} height={16} />
+              <span className="hidden sm:inline">Admin</span>
+            </Link>
+          )}
+          <Link
+            href="/settings"
+            title="Settings"
+            className="ml-1 flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-accent/10 text-sm font-semibold text-accent ring-offset-2 ring-offset-background transition-shadow hover:ring-2 hover:ring-accent/40"
+          >
+            {user.avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element -- external Vercel Blob URL, not worth an Image remotePatterns entry
+              <img src={user.avatarUrl} alt="" className="h-full w-full object-cover" />
+            ) : (
+              initial
+            )}
+          </Link>
+        </div>
+      </nav>
+    </header>
+  );
+}

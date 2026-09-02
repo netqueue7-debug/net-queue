@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@/lib/generated/prisma/client";
-import { requireAdmin, requireMember, ForbiddenError, UnauthorizedError } from "@/lib/auth/session";
+import { requireMember, ForbiddenError, UnauthorizedError } from "@/lib/auth/session";
+import { assertGroupAdmin } from "@/lib/groups/authz";
+import { prisma } from "@/lib/db";
 import { updateEventSchema } from "@/lib/events/schema";
 import { cancelEvent, updateEvent } from "@/lib/events/events";
 import { getEventDetail } from "@/lib/rsvp/event-detail";
@@ -33,10 +35,9 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
 export async function PATCH(request: NextRequest, { params }: RouteContext) {
   let admin;
   try {
-    admin = await requireAdmin(request);
+    admin = await requireMember(request);
   } catch (e) {
     if (e instanceof UnauthorizedError) return NextResponse.json({ error: e.message }, { status: 401 });
-    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
     throw e;
   }
 
@@ -46,6 +47,17 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   }
 
   const { id } = await params;
+  const existing = await prisma.event.findUnique({ where: { id }, select: { groupId: true } });
+  if (!existing) return NextResponse.json({ error: "Event not found." }, { status: 404 });
+
+  try {
+    // Group-admin of *this event's* group, not platform-admin (policy.md#6).
+    await assertGroupAdmin(existing.groupId, admin.id);
+  } catch (e) {
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
+  }
+
   try {
     const event = await updateEvent(id, parsed.data, admin.id);
     return NextResponse.json({ event });
@@ -56,17 +68,27 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 }
 
 export async function DELETE(request: NextRequest, { params }: RouteContext) {
+  let admin;
   try {
-    await requireAdmin(request);
+    admin = await requireMember(request);
   } catch (e) {
     if (e instanceof UnauthorizedError) return NextResponse.json({ error: e.message }, { status: 401 });
-    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
     throw e;
   }
 
   const { id } = await params;
+  const existing = await prisma.event.findUnique({ where: { id }, select: { groupId: true } });
+  if (!existing) return NextResponse.json({ error: "Event not found." }, { status: 404 });
+
   try {
-    const event = await cancelEvent(id);
+    await assertGroupAdmin(existing.groupId, admin.id);
+  } catch (e) {
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
+  }
+
+  try {
+    const event = await cancelEvent(id, admin.id);
     return NextResponse.json({ event });
   } catch (e) {
     if (isNotFoundError(e)) return NextResponse.json({ error: "Event not found." }, { status: 404 });

@@ -7,6 +7,8 @@ app/                    Next.js routes (pages + route handlers)
   (member)/             member-facing pages
   admin/                admin pages
   api/                  route handlers — thin: parse, authorize, call service, serialize
+components/
+  ui/                   shared design-system primitives (Button, Field/Input, Card, Badge, ConfirmDialog, ...) — no business logic
 lib/
   db.ts                 Prisma client singleton
   auth/                 session, OTP, rate limiting

@@ -13,8 +13,17 @@ async function main() {
   const userIds = users.map((u) => u.id);
 
   await prisma.eventLog.deleteMany({ where: { actorUserId: { in: userIds } } });
+  await prisma.notification.deleteMany({ where: { userId: { in: userIds } } });
   await prisma.rsvp.deleteMany({ where: { userId: { in: userIds } } });
   await prisma.event.deleteMany({ where: { createdBy: { in: userIds } } });
+  // Groups created by this run's admin must go before the admin user
+  // itself — `groups.created_by` is a RESTRICT foreign key. Memberships
+  // must go before the group for the same reason.
+  const groupIds = (await prisma.group.findMany({ where: { createdBy: { in: userIds } }, select: { id: true } })).map(
+    (g) => g.id,
+  );
+  await prisma.groupMembership.deleteMany({ where: { groupId: { in: groupIds } } });
+  await prisma.group.deleteMany({ where: { id: { in: groupIds } } });
   await prisma.user.deleteMany({ where: { id: { in: userIds } } });
 
   await prisma.$disconnect();

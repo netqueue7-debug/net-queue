@@ -40,11 +40,88 @@ enum RsvpStatus {
   canceled
 }
 
+// `immediately` needs no parameter. `days_before` uses
+// `signupOpensDaysBefore` as the "N" — same pairing pattern as
+// `LocationRevealPolicy`/`locationRevealHours` (which stays hour-grained;
+// this one is day-grained since a signup-open lead time reads more
+// naturally in days for a recurring series).
+enum SignupOpensRule {
+  immediately
+  days_before
+}
+
+enum GroupJoinPolicy {
+  open
+  approval
+}
+
+enum GroupMembershipRole {
+  member
+  admin
+}
+
+// `rejected` exists from the start (not added later) so a group admin's
+// reject action and a user's resubmit-after-reject retry both have a real
+// state to land in — see docs/phase-0b-groups.md's join-flow task.
+enum GroupMembershipStatus {
+  active
+  pending
+  rejected
+}
+
+enum GuestAddedByRole {
+  user
+  admin
+}
+
+// `pending` holds no seat (policy.md#2). `approved` claims one at the
+// host's existing queue position. `rejected` and `removed` are both
+// terminal-and-seatless but distinguish *why*: `rejected` came from an
+// admin decision, `removed` from the host taking the guest back
+// themselves — see docs/phase-2-recurrence-guests.md.
+enum GuestApprovalStatus {
+  pending
+  approved
+  rejected
+  removed
+}
+
+// The "moments that matter" get SMS (architecture.md#notifications) — kept
+// deliberately short to control Twilio cost. Everything else is in-app only.
+enum NotificationType {
+  rsvp_promoted
+  rsvp_demoted
+  event_canceled
+  guest_approved
+  guest_rejected
+  capacity_changed
+  waiver_reminder
+  location_reveal
+  day_before_reminder
+  event_comment_posted
+  event_updated
+}
+
+enum NotificationChannel {
+  sms
+  in_app
+}
+
+// `pending` also covers "queued for retry" — a failed send goes back to
+// `pending` with `attempts` incremented, until `maxAttempts` is exhausted
+// and it's marked `failed` for good (docs/phase-3-polish.md).
+enum NotificationStatus {
+  pending
+  sent
+  failed
+}
+
 model User {
   id               String    @id @default(cuid())
   phone            String    @unique
   // Null until First-login onboarding completes.
   displayName      String?   @map("display_name")
+  avatarUrl        String?   @map("avatar_url")
   role             Role      @default(member)
   waiverAcceptedAt DateTime? @map("waiver_accepted_at")
   waiverVersion    Int?      @map("waiver_version")
@@ -55,9 +132,69 @@ model User {
   eventLogEntries  EventLog[]
   sessions         Session[]
   createdEvents    Event[]
+  createdSeries    EventSeries[]
   rsvps            Rsvp[]
+  approvedGuests   Guest[]
+  createdGroups    Group[]
+  groupMemberships GroupMembership[]
+  notifications    Notification[]
+  eventComments    EventComment[]
 
   @@map("users")
+}
+
+// The tenant boundary — see architecture.md#groups--tenancy. Not publicly
+// listable or joinable without `joinCode`; creation itself is
+// platform-admin-only (policy.md#6), not exposed to regular members.
+model Group {
+  id            String          @id @default(cuid())
+  name          String
+  description   String?
+  imageUrl      String?         @map("image_url")
+  joinPolicy    GroupJoinPolicy @default(open) @map("join_policy")
+  joinCode      String          @unique @map("join_code")
+  // Nullable: a group with no waiver content configured can't set
+  // `waiver_required` true on any of its events (architecture.md).
+  waiverContent String?         @map("waiver_content")
+  waiverVersion Int?            @map("waiver_version")
+  // Nullable: unlimited. Platform-admin-only to set (lib/groups/groups.ts
+  // #setGroupMemberLimit) — a group admin raising their own cap would
+  // defeat the point. Counts active memberships only; pending join
+  // requests can still queue up past it (see joinGroupByCode/
+  // approveMembership — the block happens at the moment a membership would
+  // actually become active).
+  memberLimit   Int?            @map("member_limit")
+  createdBy     String          @map("created_by")
+  createdAt     DateTime        @default(now()) @map("created_at")
+
+  creator          User              @relation(fields: [createdBy], references: [id])
+  memberships      GroupMembership[]
+  events           Event[]
+  eventSeries      EventSeries[]
+  waiverSignatures WaiverSignature[]
+
+  @@map("groups")
+}
+
+// One row per (group, user). This is where per-group admin-ness and the
+// group's own (separate from the platform) waiver acceptance live — see
+// architecture.md#groups--tenancy for why these are NOT on `users`.
+model GroupMembership {
+  id                         String                @id @default(cuid())
+  groupId                    String                @map("group_id")
+  userId                     String                @map("user_id")
+  role                       GroupMembershipRole   @default(member)
+  status                     GroupMembershipStatus @default(pending)
+  groupWaiverAcceptedAt      DateTime?             @map("group_waiver_accepted_at")
+  groupWaiverVersionAccepted Int?                  @map("group_waiver_version_accepted")
+  joinedAt                   DateTime              @default(now()) @map("joined_at")
+
+  group Group @relation(fields: [groupId], references: [id])
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@unique([groupId, userId])
+  @@index([groupId, status])
+  @@map("group_memberships")
 }
 
 // The client only ever holds `tokenHash`'s pre-image (the raw cookie value);
@@ -74,10 +211,14 @@ model Session {
   @@map("sessions")
 }
 
-// signerType == guest signatures aren't linked to a `guests` row yet —
-// the guests table doesn't exist until Phase 2.
+// `groupId` is null for a platform-waiver signature (Phase 0's original
+// rows, and any future platform-waiver acceptance) and set for a
+// group-waiver signature (Phase 0b) — two independent waivers, one table.
+// `guestId` is a real FK now that `guests` exists (Phase 2) — Phase 0's
+// original rows all have `signerType: user` and `guestId: null`, unaffected.
 model WaiverSignature {
   id            String     @id @default(cuid())
+  groupId       String?    @map("group_id")
   waiverVersion Int        @map("waiver_version")
   signerType    SignerType @map("signer_type")
   userId        String?    @map("user_id")
@@ -85,7 +226,9 @@ model WaiverSignature {
   signedAt      DateTime   @default(now()) @map("signed_at")
   ip            String?
 
-  user User? @relation(fields: [userId], references: [id])
+  user  User?  @relation(fields: [userId], references: [id])
+  group Group? @relation(fields: [groupId], references: [id])
+  guest Guest? @relation(fields: [guestId], references: [id])
 
   @@map("waiver_signatures")
 }
@@ -119,11 +262,57 @@ model EventLog {
   @@map("event_log")
 }
 
-// seriesId isn't a real FK yet — event_series doesn't exist until Phase 2's
-// recurrence work. Included now (per the Phase 1 schema task) to avoid a
-// second migration on a live table once it does.
+// A recurring template. Creating one materializes every concrete `events`
+// row up front, from creation time through `recurUntil` (docs/phase-2-
+// recurrence-guests.md — no rolling/lazy generation). `weekdays` uses
+// JS `Date#getUTCDay()` numbering (0 = Sunday .. 6 = Saturday) so
+// lib/events/recurrence.ts needs no translation layer.
+// `startTime`/`endTime` are wall-clock "HH:mm" in `timezone`, combined
+// with each occurrence's calendar date at materialization time — see
+// lib/timezone.ts for the DST-aware conversion.
+model EventSeries {
+  id                     String               @id @default(cuid())
+  groupId                String               @map("group_id")
+  title                  String
+  description            String?
+  weekdays               Int[]
+  startTime              String               @map("start_time")
+  endTime                String               @map("end_time")
+  timezone               String
+  recurUntil             DateTime             @map("recur_until")
+  signupOpensRule        SignupOpensRule      @map("signup_opens_rule")
+  signupOpensDaysBefore  Int?                 @map("signup_opens_days_before")
+  capacity               Int?
+  maxGuestsPerRsvp       Int?                 @map("max_guests_per_rsvp")
+  waiverRequired         Boolean              @default(false) @map("waiver_required")
+  generalLocation        String?              @map("general_location")
+  exactLocation          String?              @map("exact_location")
+  googleMapsUrl          String?              @map("google_maps_url")
+  appleMapsUrl           String?              @map("apple_maps_url")
+  locationRevealPolicy   LocationRevealPolicy @map("location_reveal_policy")
+  locationRevealHours    Int?                 @map("location_reveal_hours")
+  createdBy              String               @map("created_by")
+  createdAt              DateTime             @default(now()) @map("created_at")
+
+  creator User    @relation(fields: [createdBy], references: [id])
+  group   Group   @relation(fields: [groupId], references: [id])
+  events  Event[]
+
+  @@map("event_series")
+}
+
+// `groupId` is required — every event belongs to exactly one group
+// (docs/phase-0b-groups.md backfilled it onto every pre-existing Phase 1
+// row before this NOT NULL constraint was added). Denormalized here (not
+// derived only through `seriesId`) so one-off events scope cleanly too and
+// every RSVP/queue query filters by group with a single join.
+//
+// `overridden` marks an instance hand-edited independently of its series —
+// a series-level edit skips overridden instances permanently (the "this
+// event vs. all following" model), and cancellation follows the same rule.
 model Event {
   id                   String               @id @default(cuid())
+  groupId              String               @map("group_id")
   seriesId             String?              @map("series_id")
   overridden           Boolean              @default(false)
   title                String
@@ -133,20 +322,52 @@ model Event {
   timezone             String
   capacity             Int?
   maxGuestsPerRsvp     Int?                 @map("max_guests_per_rsvp")
+  // Defaults from the series when one exists, overridable per instance —
+  // same pattern as `capacity` and `maxGuestsPerRsvp`.
+  waiverRequired       Boolean              @default(false) @map("waiver_required")
   signupOpensAt        DateTime             @map("signup_opens_at")
   generalLocation      String?              @map("general_location")
   exactLocation        String?              @map("exact_location")
+  // Optional, pasted by the admin — gated on the same reveal timing as
+  // exactLocation (a map link is at least as precise as the address text
+  // itself, so it must never leak earlier).
+  googleMapsUrl        String?              @map("google_maps_url")
+  appleMapsUrl         String?              @map("apple_maps_url")
   locationRevealPolicy LocationRevealPolicy @map("location_reveal_policy")
   locationRevealHours  Int?                 @map("location_reveal_hours")
   status               EventStatus          @default(scheduled)
   createdBy            String               @map("created_by")
   createdAt            DateTime             @default(now()) @map("created_at")
 
-  creator         User       @relation(fields: [createdBy], references: [id])
+  creator         User           @relation(fields: [createdBy], references: [id])
+  group           Group          @relation(fields: [groupId], references: [id])
+  series          EventSeries?   @relation(fields: [seriesId], references: [id])
   rsvps           Rsvp[]
   eventLogEntries EventLog[]
+  notifications   Notification[]
+  comments        EventComment[]
 
+  @@index([groupId, status])
+  @@index([seriesId])
   @@map("events")
+}
+
+// Flat, unthreaded — a chronological Q&A/updates list per event, not a
+// nested discussion. Any active group member can post; deleting a comment
+// is allowed for its own author or a group admin of the event's group
+// (mirrors RSVP-removal authority), enforced in the route layer, not here.
+model EventComment {
+  id        String   @id @default(cuid())
+  eventId   String   @map("event_id")
+  authorId  String   @map("author_id")
+  body      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  event  Event @relation(fields: [eventId], references: [id])
+  author User  @relation(fields: [authorId], references: [id])
+
+  @@index([eventId, createdAt])
+  @@map("event_comments")
 }
 
 // Uniqueness on (event_id, user_id) is enforced at the DB level, but only
@@ -163,11 +384,74 @@ model Rsvp {
   canceledAt    DateTime?  @map("canceled_at")
   createdAt     DateTime   @default(now()) @map("created_at")
 
-  event Event @relation(fields: [eventId], references: [id])
-  user  User  @relation(fields: [userId], references: [id])
+  event  Event   @relation(fields: [eventId], references: [id])
+  user   User    @relation(fields: [userId], references: [id])
+  guests Guest[]
 
   @@index([eventId, queuePosition])
   @@index([eventId, status])
   @@index([eventId, userId])
   @@map("rsvps")
+}
+
+// One row per guest — "user adds 2 more after 2 were approved" is just two
+// new `pending` rows; earlier approvals are untouched (architecture.md).
+// `waiverToken` is unguessable (32 bytes) and public: it's the only
+// credential needed to reach that guest's waiver-signing page, no login.
+model Guest {
+  id             String              @id @default(cuid())
+  rsvpId         String              @map("rsvp_id")
+  name           String?
+  addedByRole    GuestAddedByRole    @map("added_by_role")
+  approvalStatus GuestApprovalStatus @default(pending) @map("approval_status")
+  approvedBy     String?             @map("approved_by")
+  approvedAt     DateTime?           @map("approved_at")
+  waiverToken    String              @unique @map("waiver_token")
+  waiverSignedAt DateTime?           @map("waiver_signed_at")
+  createdAt      DateTime            @default(now()) @map("created_at")
+
+  rsvp             Rsvp              @relation(fields: [rsvpId], references: [id])
+  approver         User?             @relation(fields: [approvedBy], references: [id])
+  waiverSignatures WaiverSignature[]
+
+  @@index([rsvpId])
+  @@map("guests")
+}
+
+// The outbox for both SMS and in-app notifications (docs/phase-3-polish.md).
+// One row per *occurrence* — a user promoted twice for the same event over
+// time (e.g. cancel, re-signup, promoted again) gets two rows, and that's
+// correct, not a duplicate. Idempotency ("a retry never double-texts") is
+// per-row via `status`: dispatch only ever sends a `pending` row and flips
+// it to `sent`, so re-running the dispatcher/retry sweep never re-sends an
+// already-`sent` row. There's deliberately no unique constraint on
+// `(user_id, event_id, type)` — that would silently drop legitimate repeat
+// notifications (a second guest approved for the same host, another
+// capacity change), which would be a real bug, not a safety net.
+//
+// Cron-driven types (`location_reveal`, `day_before_reminder`) get their
+// own idempotency check instead: "does a row of this type already exist
+// for this (user, event)" before creating one, since those really are
+// meant to fire at most once per event, ever — see lib/notifications/jobs.ts.
+model Notification {
+  id        String               @id @default(cuid())
+  userId    String               @map("user_id")
+  eventId   String?              @map("event_id")
+  type      NotificationType
+  channel   NotificationChannel
+  status    NotificationStatus   @default(pending)
+  payload   Json
+  attempts  Int                  @default(0)
+  lastError String?              @map("last_error")
+  readAt    DateTime?            @map("read_at")
+  createdAt DateTime             @default(now()) @map("created_at")
+  sentAt    DateTime?            @map("sent_at")
+
+  user  User   @relation(fields: [userId], references: [id])
+  event Event? @relation(fields: [eventId], references: [id])
+
+  @@index([userId, readAt])
+  @@index([status])
+  @@index([userId, eventId, type])
+  @@map("notifications")
 }

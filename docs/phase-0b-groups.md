@@ -1,0 +1,103 @@
+# Phase 0b — Groups & Multi-tenancy
+
+**Goal:** every event, RSVP, and waiver lives inside a group; a user can only see or act on a group's data through an active membership; group admin-ness replaces the global admin flag for day-to-day operations.
+
+**Duration:** ~1 week · **Prerequisites:** Phase 1 complete (it is — this phase retrofits scoping onto the Phase 1 schema before Phase 2 recurrence/guests work lands on top of it)
+
+Read alongside: `docs/policy.md` (**rule 6** is new), `docs/architecture.md` (**"Groups & tenancy"** section is new), `docs/conventions.md`.
+
+This phase exists because Phase 1 shipped with a single global event/RSVP space and a global `role`. Retrofitting after real data exists (per the exit-criterion load test and any real volleyball night already run) means this phase is as much about a safe migration/backfill as new code — treat the backfill step as seriously as the concurrency work in Phase 1.
+
+## Part A — Schema
+
+- [x] **Schema: `groups` + `group_memberships`.** Per `architecture.md`. `groups.join_code` unique, unguessable (same entropy bar as `guests.waiver_token` in Phase 2's plan). `group_memberships` unique `(group_id, user_id)`.
+  - *Check:* migration applies clean; duplicate `(group_id, user_id)` rejected at the DB level.
+  - `GroupMembershipStatus` includes `rejected` from the start (not added later), so the join-flow and approval-queue tasks below have a real state to land a rejection in without a second migration.
+
+- [x] **Schema: `group_id` on `events`.** Required (`NOT NULL`) FK to `groups`, denormalized onto `events` even when a `series_id` is present (see `architecture.md` for why). Added `waiver_required` (bool, default false), same override pattern as `capacity`. (`event_series` doesn't exist until Phase 2, so there's nothing there yet to add `group_id` to — Phase 2's own schema task will include it from the start.)
+  - *Check:* migration applies clean against a database with live Phase 1 events. Done as two migrations (`groups_multitenancy` adds it nullable, `events_group_id_required` tightens to `NOT NULL` after the backfill ran) — a bare `NOT NULL` add on a live table isn't possible without that two-step.
+
+- [x] **Schema: add group-scoped waiver fields — additive, nothing removed from `users`.** Added `group_id` (nullable) to `waiver_signatures`. Added `waiver_content`/`waiver_version` (nullable) to `groups` and `group_waiver_accepted_at`/`group_waiver_version_accepted` (nullable) to `group_memberships`. `users.waiver_accepted_at`/`waiver_version` (the Phase 0 platform waiver) are untouched.
+  - *Check:* migration applies clean; Phase 0's onboarding gate is unaffected (nothing about `users.waiver_accepted_at`/`waiver_version` changed).
+
+- [x] **Backfill: default group.** `scripts/backfill-default-group.ts` (`npm run backfill:default-group`) creates one group from existing data (`join_policy: open`), migrates every `user.role = admin` into a `group_memberships.role = admin` row, everyone else into `active`/`member`, and stamped `group_id` onto every pre-existing event before the `NOT NULL` migration landed. Idempotent — safe to rerun (verified).
+  - *Check:* ran against the dev database; every event has a non-null `group_id`; the platform-waiver gate is untouched.
+
+- [x] **`users.role` becomes platform-only everywhere event/RSVP routes are concerned.** Every route that used `requireAdmin()` (`POST`/`PATCH`/`DELETE /api/events[...]`, `GET`/`DELETE /api/admin/events[...]`) now checks group-admin membership on the specific event's (or query-param) group instead. `requireAdmin`/platform `role` remain, unused by these routes now — a genuinely platform-only surface may still want them later (e.g. cross-group ops tooling), but none exists yet.
+  - *Check:* a user who is only a group admin (not platform admin) can reach every one of these routes for their group; a platform admin with no membership in the target group is rejected from all of them (`tests/events-crud-route.test.ts`, `tests/admin-remove-rsvp.test.ts`).
+
+## Part B — Authz & services
+
+- [x] **`assertGroupMember(groupId, userId)` / `assertGroupAdmin(groupId, userId)`, `requireGroupMember`/`requireGroupAdmin` request-based wrappers, `getActiveGroupIds(userId)`, and `getDefaultAdminGroupId(userId)`** — `lib/groups/authz.ts`. The `assert*` forms exist separately so a route can check authentication (401) before it has parsed a body containing the target `groupId` (a member/admin-of-a-different-group getting a body-shaped 400 for missing `groupId` would be the wrong signal — see `POST /api/events`'s ordering). `getDefaultAdminGroupId` is an explicit stand-in for the still-missing group switcher (Part C) — it picks the admin's earliest group rather than asking; callers using it say so in a comment.
+  - *Check:* used and tested via every route below.
+
+- [x] **Scope every existing event/RSVP read and write by group.**
+  - `listEventsForMember` / `GET /api/events` (member listing): filters to `groupId IN (caller's active groups)` via `getActiveGroupIds` — a member of zero groups sees zero events, not an error and not everything.
+  - `getEventDetail` / `GET /api/events/:id`: returns `null` (→ 404) for an event whose group the caller has no active membership in — indistinguishable from a nonexistent event id, by design.
+  - `createRsvp`: checks membership in the event's group first, inside the same `withEventLock` transaction, throwing the new `EventNotFoundError` (same "looks nonexistent" treatment) before any other business check — see `lib/rsvp/errors.ts`.
+  - `cancelRsvp` deliberately has **no** membership gate — canceling an existing RSVP must keep working even if the member's group standing lapsed since signup (e.g. mid admin-removal); `RsvpNotFoundError` already hides a foreign RSVP from anyone who never had one.
+  - `listEvents` (admin unfiltered listing) now takes a required `groupId`; `GET /api/admin/events` takes it as a query param and checks `assertGroupAdmin` before calling it — there is no more unscoped "every event" listing.
+  - `PATCH`/`DELETE /api/events/:id` and `DELETE /api/admin/events/:id/rsvp` all resolve the event's `groupId` first and check `assertGroupAdmin` on it, replacing the old platform `requireAdmin()`.
+  - `EventDetail` now returns the viewer's **group** role (`viewerRole`) alongside the data, and the admin UI (`event-detail-client.tsx`) was switched to key off it instead of the platform role — otherwise a platform admin with no group-admin membership would see (and 403 on) admin controls, while an actual group admin without the platform flag would see none.
+  - *Check:* a member of group A gets 404 hitting an event that belongs to group B via any of the above (list, detail, RSVP create), even with a guessed valid event id — verified by the updated test suite (every test that RSVPs now sets up real group membership first, which is itself evidence the gate is live) plus the 50-concurrent load test, which still passes with the gate in place.
+
+- [x] **Group join flow.** `POST /api/groups/join` (`lib/groups/groups.ts#joinGroupByCode`) with a join code: `open` → create/reactivate an `active` membership immediately; `approval` → create a `pending` membership. Resubmitting a code for an existing `pending` or `rejected` membership updates that row rather than erroring or duplicating (`policy.md#6`); an already-`active` membership (including its role) is left untouched by a repeat submission.
+  - *Check:* `tests/groups.test.ts` — joining an open group's code twice is idempotent (one row, still active); joining an approval group creates exactly one pending row regardless of a reject → resubmit → approve cycle; an invalid code 404s.
+
+- [x] **`/join/:code` as a single entry point for both new and returning users.** `app/(member)/join/[code]/page.tsx`. An unauthenticated visitor is redirected to `/login?next=/join/:code`; a not-yet-onboarded one to `/onboarding?next=/join/:code` — `next` is threaded through both the login page (`useSearchParams`, passed along to `/onboarding?next=…` or used directly after OTP verify) and the onboarding form/route as a plain query param (not a session-backed cookie as originally sketched — a query param survives the same full-page navigations and is simpler; nothing sensitive is in it). Once authenticated and onboarded, the page calls `joinGroupByCode` directly (server-side, no extra round trip) and renders the result.
+  - *Check:* manually verified the redirect chain end-to-end in dev; not yet covered by Playwright (the phase doc's originally-specified check) — the existing e2e suite only seeds a session directly and never exercises real OTP/onboarding, so this would need new e2e infrastructure, called out as follow-up rather than done here.
+
+- [x] **Group admin: membership approval queue.** `GET /api/groups/:id/memberships` (pending list) + `POST .../:userId/approve` + `POST .../:userId/reject`, all gated by `assertGroupAdmin`. Minimal UI at `/admin/groups/:id/memberships`.
+  - *Check:* `tests/groups.test.ts` — a rejected-then-resubmitted user reaches `pending` again; a plain member of the same group gets 403 from the queue endpoint.
+
+- [x] **Group creation: platform-admin-only.** `POST /api/groups` gated by the existing platform `requireAdmin()` (kept its name — see the note on the Part A task above; a `requirePlatformAdmin` rename was judged unnecessary churn since it's now the *only* caller). Body names the phone of the user to install as the group's first admin; `createGroup` upserts that user and creates their `group_memberships` row directly as `active`/`admin` — no join code or approval step for them.
+  - *Check:* `tests/groups.test.ts` — a plain member and an unauthenticated caller both rejected (403/401); a platform admin succeeds and the named phone lands as `active`/`admin` with no join-code step.
+
+- [x] **Group admin: manage an existing group.** `PATCH /api/groups/:id` (name, join policy, waiver content/version) + `POST /api/groups/:id/join-code/rotate`, both gated by `assertGroupAdmin` on that specific group. Membership *role* changes (promote/demote an existing member) are not yet exposed — no task above called for it explicitly and no UI needs it yet; noted as a gap.
+  - *Check:* `tests/groups.test.ts` exercises setting waiver content/version via `PATCH`; a member of a different group would get 403 (same `assertGroupAdmin` path already covered elsewhere).
+
+- [x] **Group-scoped waiver acceptance screen.** `GET`/`POST /api/groups/:id/waiver[/accept]` + `/groups/:id/waiver` page, entirely separate from Phase 0's onboarding waiver screen. `GET /api/groups` includes a `waiverUpToDate` flag per membership so `/groups` can show an "outstanding waiver" link per group.
+  - *Check:* `tests/groups.test.ts` covers the accept flow and its effect on `createRsvp`; multi-group independence (accepting group A's waiver doesn't touch group B's) follows directly from the schema (one row per membership) but isn't separately asserted — worth a follow-up test once a second waiver-requiring group exists in a test.
+
+- [x] **Wire `waiver_required` into `createRsvp`.** New `GroupWaiverNotAcceptedError`, checked inside `withEventLock` right after the existing platform-waiver check, only when `event.waiverRequired` is true.
+  - *Check:* `tests/groups.test.ts` — an event with `waiverRequired: true` rejects `createRsvp` with `GroupWaiverNotAcceptedError` until the group waiver is accepted (even for a user who already has the platform waiver), then succeeds.
+
+## Part C — UI
+
+- [x] **Group switcher / picker.** `/groups` (`app/(member)/groups/page.tsx`) lists the caller's memberships (with status and outstanding-waiver links) and a join-by-code form. Not a full "switcher" in the sense of changing which group's events you're viewing — event listing already spans all your active groups at once (Part B), so there's nothing to switch *between* for the member-facing event feed. For admins: `/admin/groups` (platform-admin-only, see the two-tier admin task below) lists every group with direct links into each; `/admin/events` still guesses at "your" one group via `getDefaultAdminGroupId` for the single-group-admin case (flagged in-code with a `TODO(phase-0b Part C)`).
+  - *Check:* manually verified `/groups` and `/admin/groups` render correctly with zero, one, and multiple memberships/groups in dev.
+
+- [x] **Admin membership approval UI**, per group. `/admin/groups/:id/memberships` — approve/reject buttons, 404s (via `notFound()`) for anyone who isn't that group's admin (or a platform admin, which now also passes — see below).
+  - *Check:* covered at the API layer by `tests/groups.test.ts`; the page itself is a thin wrapper with no additional logic to unit test. Not yet run through Playwright (same real-OTP-flow gap as the `/join/:code` check above).
+
+- [x] **Two-tier admin model made explicit: platform admin has full control over every group; group admin is scoped to their own.** This was implicit but under-specified before — `policy.md#6` and `architecture.md#groups--tenancy` originally said the platform role "must never substitute for a group-admin check," which turned out to be the wrong call once actually building admin tooling: a platform admin needs to finish setting up any group without first joining it. Reconciled by adding `lib/groups/authz.ts#resolveGroupMembership` — the single place a platform admin's `users.role = admin` is treated as an implicit active-admin membership in *any* group (returns a synthetic, unpersisted `GroupMembership`) — and routing `assertGroupMember`/`assertGroupAdmin`/`getEventDetail` through it. `listEventsForMember`/`GET /api/events` (the personal event feed) deliberately still use only real memberships — the override is for admin *action* surfaces, not for silently flooding a platform admin's own event feed with every group in the system.
+  - **Admin-scoped group creation UI**: `/admin/groups` (list) and `/admin/groups/new` (form: name, join policy, admin's phone), both platform-admin-only, wrapping the existing `POST /api/groups`. Manual entry for now, as requested — the form is written so it can later become the "review and finish" step for a public group-request form, without changing its fields.
+  - **`/admin/groups/:id/events`**: a group-scoped admin events page reachable for any group a caller administers — a real group admin, or a platform admin via the override — unlike `/admin/events`'s single-group guess.
+  - *Check:* `tests/groups.test.ts` ("a platform admin has full control over a group they have no membership row in at all") — a platform admin with zero rows in `group_memberships` for a group can create an event in it, view it with full (`admin`) `viewerRole`, and edit it; a plain member of that same group still gets 403 on the edit.
+
+## Exit criteria
+
+- [x] A user with no membership in a group cannot reach any of that group's events, RSVPs, or member list through the API, not just the UI (verified by direct API calls with a valid session but no membership) — `tests/events-crud-route.test.ts`, `tests/groups.test.ts`, and the group-scoping work in the prior session.
+- [x] A plain member (and a group admin of an unrelated group) cannot create a new group through the API — only a platform admin can, confirmed by a direct API call, not just absence of a UI button — `tests/groups.test.ts`.
+- [x] Backfill has run against the current dataset with zero data loss: every pre-existing event, RSVP, and waiver acceptance is attributed to the default group and behaves identically to before this phase, from a member's point of view — verified against the dev database.
+- [x] Two groups, one `open` and one `approval`, are demonstrably isolated: creating an event in one never appears to a member of only the other — `tests/groups.test.ts` ("two groups are isolated at the event level, not just membership"): a member of the open group gets it excluded from `GET /api/events`, 404 from `GET /api/events/:id`, and 404 attempting to RSVP, while an active member of the approval group sees it fine.
+
+## Two-tier admin model (added after initial Phase 0b build)
+
+Clarified and implemented after the fact: a **platform admin** (`users.role = admin`) has full administrative control over *every* group, no membership row required — the rare ops/setup tier. A **group admin** stays scoped to only their own group(s), exactly as originally built. See `docs/policy.md#6` and `docs/architecture.md#groups--tenancy` for the full writeup, and `lib/groups/authz.ts#resolveGroupMembership` for the single implementation point (a synthetic, unpersisted admin membership returned for a platform admin acting on any group).
+
+- [x] **`resolveGroupMembership`** — every group-authz check (`assertGroupMember`, `assertGroupAdmin`, `getEventDetail`) routes through it. The personal event feed (`listEventsForMember`/`GET /api/events`) deliberately does not — real memberships only, so a platform admin's own feed isn't silently flooded by every group in the system.
+- [x] **`/admin/groups` + `/admin/groups/new`** — platform-admin-only listing of every group and a manual creation form (name, join policy, admin's phone), wrapping `POST /api/groups`. Manual entry now, by request; fields chosen to match what a future public "request a group" form would collect (**not built** — still a follow-up) so that form could feed the same review/finish screen later.
+- [x] **`/admin/groups/:id/events`** — group-scoped admin events page reachable for any group a caller administers (real group admin, or platform admin via the override).
+- [x] **Membership role changes**: `PATCH /api/groups/:id/memberships/:userId` (`lib/groups/groups.ts#updateMembershipRole`), gated by `assertGroupAdmin`, with a `LastAdminError` (409) guard against demoting a group's only remaining active admin. UI: a promote/demote button per active member on `/admin/groups/:id/memberships`, alongside the existing pending-approval queue.
+- [x] **Multi-group admin picker**: `getAdminGroupIds` (real admin memberships only) backs `/admin/events`, which now redirects straight through for a single-group admin, shows a real picker for one who administers several, and points a platform admin with no group of their own at `/admin/groups`. `getDefaultAdminGroupId` is now just `getAdminGroupIds()[0]`, kept only where "any one of mine" is good enough.
+- [x] **Real Playwright coverage of `/join/:code` and the approval queue** — `e2e/join-flow.spec.ts` (`scripts/e2e/seed-join-flow.ts` / `cleanup-join-flow.ts`): unauthenticated → `/login?next=...` redirect, authenticated-but-not-onboarded → `/onboarding?next=...` redirect, an open-group join landing on "You're in!" with the membership verifiably active on `/groups` afterward, and a full approval-group cycle (member sees "Request sent" → shows pending on `/groups` → an admin approves via real clicks on `/admin/groups/:id/memberships` → member's pending status clears). Sessions are still seeded/injected directly rather than driving real OTP through the browser, consistent with `e2e/member-rsvp-flow.spec.ts`'s existing rationale.
+  - *Check:* `npx playwright test` — 5/5 passing (both spec files), verified cleanup leaves no orphaned rows.
+
+## Known gaps / follow-ups
+
+- **Public "request a group" form**: not built. `/admin/groups/new`'s fields are intentionally the same ones such a form would collect, so it can later feed straight into this same review/finish screen instead of a platform admin retyping everything from a Slack message or email.
+
+## Out of scope
+
+Per-group ban lists (global `banned_at` stays as-is), cross-group admin tooling/dashboards (Phase 3's admin dashboard becomes group-scoped when it's built, not before), billing or group limits, public group discovery.

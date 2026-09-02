@@ -5,6 +5,7 @@ import { createSession } from "@/lib/auth/session";
 import { createRsvp } from "@/lib/rsvp/rsvp";
 import { WAIVER_VERSION } from "@/lib/waivers/content";
 import { DELETE as removeRoute } from "@/app/api/admin/events/[id]/rsvp/route";
+import { addActiveMembership, createTestGroup, deleteTestGroup } from "./helpers/test-group";
 
 describe("admin RSVP removal", () => {
   const adminPhone = "+15555550280";
@@ -16,6 +17,7 @@ describe("admin RSVP removal", () => {
   let adminToken: string;
   let memberToken: string;
   let eventId: string;
+  let groupId: string;
 
   beforeAll(async () => {
     const admin = await prisma.user.create({
@@ -33,8 +35,14 @@ describe("admin RSVP removal", () => {
     adminToken = (await createSession(admin.id)).token;
     memberToken = (await createSession(member.id)).token;
 
+    groupId = (await createTestGroup(adminId, "Admin Remove Test Group")).id;
+    await addActiveMembership(groupId, adminId, "admin");
+    await addActiveMembership(groupId, memberId, "member");
+    await addActiveMembership(groupId, memberBId, "member");
+
     const event = await prisma.event.create({
       data: {
+        groupId,
         title: "Admin Remove Test",
         startsAt: new Date(Date.now() + 60 * 60 * 1000),
         endsAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
@@ -53,8 +61,10 @@ describe("admin RSVP removal", () => {
 
   afterAll(async () => {
     await prisma.eventLog.deleteMany({ where: { eventId } });
+    await prisma.notification.deleteMany({ where: { eventId } });
     await prisma.rsvp.deleteMany({ where: { eventId } });
     await prisma.event.deleteMany({ where: { id: eventId } });
+    await deleteTestGroup(groupId);
     await prisma.user.deleteMany({ where: { phone: { in: [adminPhone, memberPhone, memberBPhone] } } });
   });
 

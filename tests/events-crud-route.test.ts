@@ -2,6 +2,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { createSession } from "@/lib/auth/session";
+import { createTestGroup, deleteTestGroup } from "./helpers/test-group";
 import { GET as listRoute, POST as createRoute } from "@/app/api/events/route";
 import { DELETE as deleteRoute, GET as getRoute, PATCH as patchRoute } from "@/app/api/events/[id]/route";
 
@@ -13,7 +14,7 @@ function req(url: string, opts: { method?: string; body?: unknown; token?: strin
   });
 }
 
-const validEventBody = {
+const baseEventBody = {
   title: "Tuesday Volleyball",
   startsAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
   endsAt: new Date(Date.now() + 26 * 60 * 60 * 1000).toISOString(),
@@ -27,10 +28,13 @@ describe("admin single-event CRUD", () => {
   const memberPhone = "+15555550211";
   let adminToken: string;
   let memberToken: string;
+  let groupId: string;
   let eventId: string;
+  let validEventBody: typeof baseEventBody & { groupId: string };
 
   afterAll(async () => {
     if (eventId) await prisma.event.deleteMany({ where: { id: eventId } });
+    if (groupId) await deleteTestGroup(groupId);
     await prisma.user.deleteMany({ where: { phone: { in: [adminPhone, memberPhone] } } });
   });
 
@@ -39,6 +43,16 @@ describe("admin single-event CRUD", () => {
     const member = await prisma.user.create({ data: { phone: memberPhone, role: "member" } });
     adminToken = (await createSession(admin.id)).token;
     memberToken = (await createSession(member.id)).token;
+
+    const group = await createTestGroup(admin.id, "Events CRUD Test Group");
+    groupId = group.id;
+    await prisma.groupMembership.create({
+      data: { groupId, userId: admin.id, role: "admin", status: "active" },
+    });
+    await prisma.groupMembership.create({
+      data: { groupId, userId: member.id, role: "member", status: "active" },
+    });
+    validEventBody = { ...baseEventBody, groupId };
   });
 
   it("a member cannot create an event", async () => {

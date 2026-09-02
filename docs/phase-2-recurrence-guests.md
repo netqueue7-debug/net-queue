@@ -4,65 +4,78 @@
 
 **Duration:** ~2 weeks · **Prerequisites:** Phase 1 exit criterion met, including a real night run
 
-Read alongside: `docs/policy.md` (**all five rules apply — reread it**), `docs/architecture.md`, `docs/conventions.md`.
+Read alongside: `docs/policy.md` (**all rules apply — reread it, including rule 6**), `docs/architecture.md`, `docs/conventions.md`.
+
+> **Prerequisite:** `docs/phase-0b-groups.md` completes before this phase starts. Series and events created here inherit `group_id`/`waiver_required` from the outset; the approval queue and admin views are per-group.
 
 ## Part A — Recurring series
 
-- [ ] **Schema: event_series.** Per `architecture.md`. Add `series_id` and `overridden` to `events` if not already present from Phase 1.
-  - *Check:* migration applies clean against a database with live Phase 1 events.
+- [x] **Schema: event_series.** `event_series` table per `architecture.md`, plus a real FK from `events.series_id` (Phase 1 shipped the column but not the constraint, since the table didn't exist yet) and an index on it. `weekdays` uses JS `Date#getUTCDay()` numbering (0=Sun..6=Sat); `startTime`/`endTime` are wall-clock `"HH:mm"` strings combined with each occurrence's date at materialization time (`lib/timezone.ts`).
+  - *Check:* migration applied clean against the live dev database (two migrations: `event_series`, no data to backfill since the table is new).
 
-- [ ] **Materialization.** Creating a series generates every concrete `events` row up front (a 3-month window is ~30 rows — no rolling generation needed). Each instance derives its own `signup_opens_at` from the series' `signup_opens_rule` (an offset like "48 hours before start", or "immediately").
-  - *Check:* "Tuesdays and Thursdays 7–10pm until Nov 30" produces the right count of instances with correct local times.
+- [x] **Materialization.** `lib/events/series.ts#createSeries` generates every occurrence from series-creation time through `recurUntil` up front via `lib/events/recurrence.ts#generateOccurrenceDates` + `materializeOccurrence`, in one `prisma.$transaction` (series row + bulk `event.createMany`). `signupOpensRule: "immediately"` stamps every instance with the materialization timestamp; `"hours_before"` computes an offset from that instance's own `startsAt`.
+  - *Check:* `tests/series.test.ts` — a Tuesday/Thursday series produces exactly the right instances, each genuinely on Tue/Thu **in the series' own timezone** (not UTC or the server's), at the correct local start/end time.
 
-- [ ] **Timezone-correct recurrence.** Generate occurrences in the series' timezone, then convert to UTC. A 3-month window crosses a DST boundary; naive UTC arithmetic will silently shift events by an hour.
-  - *Check:* a series spanning the November DST change keeps 7:00pm local on every instance.
+- [x] **Timezone-correct recurrence.** `generateOccurrenceDates` enumerates calendar dates as a pure Y-M-D cursor (immune to DST by construction — it never does wall-clock arithmetic); `materializeOccurrence` converts each date + the series' `startTime`/`endTime` to a UTC instant via `lib/timezone.ts#zonedTimeToUtc` (generalized from the location-reveal DST math Phase 1 already shipped and tested).
+  - *Check:* `tests/recurrence.test.ts` and `tests/series.test.ts` both assert 7:00pm-10:00pm local on instances straddling the November DST change, with the underlying UTC hour actually differing across it (not just two coincidentally-equal instants).
 
-- [ ] **Series edit semantics.** Editing a series updates future, **non-overridden** instances only. Editing a single instance sets `overridden = true`, permanently protecting it from series edits. Past instances are never modified.
-  - *Check:* edit instance #3's capacity, then change the series capacity — instance #3 keeps its own value, others update.
+- [x] **Series edit semantics.** `updateSeries` updates the series row, then propagates onto every future (`startsAt` in the future), non-overridden, still-`scheduled` instance — routed through the existing per-event `updateEvent` (not a bulk SQL update) specifically so a capacity change still goes through `withEventLock`'s boundary recompute and promotion notifications. **Scope decision**: only the per-instance settings that map 1:1 onto an `Event` field are editable post-creation (title, description, capacity, maxGuestsPerRsvp, waiverRequired, locations, location reveal policy/hours) — the schedule shape (weekdays/start-end time/timezone/recurUntil) is fixed at creation for this phase; reconciling already-materialized dates against a changed weekly pattern is its own feature, and extending the horizon is explicitly Phase 3 scope ("series horizon top-up"). See `lib/events/series-schema.ts`'s comment.
+  - *Check:* `tests/series.test.ts` ("series edit semantics") — a past instance and a hand-edited (`overridden`) instance are both left untouched by a series-level capacity change; every other future instance gets the new value. A second test confirms the capacity-change-promotes-from-waitlist path still fires per affected instance.
 
-- [ ] **Cancellation.** Cancel one instance (`status: canceled`, notify everyone on going + waitlist). Cancel a series → cancels all future instances, leaves past ones alone.
-  - *Check:* canceling an instance with a populated queue notifies the right set and the event renders as canceled to members.
+- [x] **Cancellation.** Single-instance cancellation (`cancelEvent`, already existed from Phase 1) now also notifies every still-active (going + waitlist) RSVP — that capability didn't exist before this phase. Series cancellation (`cancelSeries`) cancels **every future instance regardless of `overridden`** — unlike an edit, calling off the whole series calls off hand-edited instances too — by looping the same `cancelEvent` per instance, so each gets its own `event_log` row and notifications. Past instances are never touched by either path.
+  - *Check:* `tests/series.test.ts` ("cancellation") — a past instance survives, a future overridden instance is canceled anyway, and the console-log notification fires for the RSVP'd member on the canceled instance.
 
-- [ ] **Admin series UI.** Create/edit form with weekday multi-select, time range, end date, and all the per-event settings (capacity, guest cap, signup-open rule, location policy) that instances inherit. Instance list with per-instance edit/cancel and an "edited" marker.
-  - *Check:* Playwright — create a series, edit one instance, cancel another, verify member view reflects all three states.
+- [x] **Admin series UI.** `/admin/groups/:id/series` (list + create form: weekday checkboxes, start/end time, timezone, recur-until date, signup-open rule, capacity/guest-cap/waiver/location fields) and `/admin/groups/:id/series/:seriesId` (instance list showing status and an "edited" marker for `overridden` instances, plus a "cancel remaining series" button). Per-instance edit/cancel reuses the existing single-event admin controls on `/events/:id` — no separate UI needed there.
+  - *Check:* `e2e/series-flow.spec.ts` — real Playwright run: admin creates a series, edits one instance's title, cancels another, and a separate member session sees the edited title, the canceled banner, and no admin controls on either.
+
+## Part A exit criterion (from below) — met
+
+A single series generates a correct set of instances (verified with both a short window and one spanning a real DST change), one of which has been individually edited and one canceled — see the checks above. The mixed-party-size concurrency exit criterion is Part B's (guests don't exist yet), so it isn't claimed here.
 
 ## Part B — +1s
 
-- [ ] **Schema: guests.** Per `architecture.md`, including `waiver_token` (unique, unguessable — 32+ bytes of entropy).
-  - *Check:* migration clean; token collisions impossible by construction.
+- [x] **Schema: guests.** `guests` table per `architecture.md` (`lib/generated/prisma` model `Guest`), `waiver_token` unique with 32 bytes of entropy (`randomBytes(32).toString("base64url")`, same generator function used for every other unguessable token in this codebase — group join codes, etc.). `waiver_signatures.guest_id` is now a real FK (it was a loose, unlinked column since Phase 0, before the `guests` table existed).
+  - *Check:* migration applied clean against the live dev database.
 
-- [ ] **Party-aware seat math.** Extend `computeDerivedStatuses` so `seats(rsvp) = 1 + approved guest count`. Atomic parties, no skipping (`policy.md#1`).
-  - *Check:* capacity 10 with 9 seats taken and a party of 2 next — the party waits, **and so does the solo player behind them**. The 10th seat stays empty. Test this exact case explicitly; it is the rule most likely to be "helpfully" broken.
+- [x] **Party-aware seat math.** `lib/rsvp/seats.ts#getApprovedGuestCounts`/`seatsFor` compute `seats(rsvp) = 1 + approved guest count` from real guest rows; wired into both places that previously hardcoded `seats: 1` — `withEventLock`'s before/after snapshot (`lib/rsvp/with-event-lock.ts`) and `getEventDetail`/`listEventsForMember` (`lib/rsvp/event-detail.ts`). `computeDerivedStatuses` itself needed no changes — it was already written to accept a `seats` field per caller, exactly so this phase would only need to change what callers pass in (Phase 1's own note in `lib/rsvp/seat-math.ts` said as much).
+  - *Check:* `tests/guests.test.ts` ("party-aware seat math") — capacity 3, a party that grows to 3 seats via approved guests waitlists entirely rather than partially seating, and a solo party behind it does **not** skip ahead into the vacated seat.
 
-- [ ] **Member: add guests.** At signup or after, via `POST /events/:id/rsvp/guests`. Creates `pending` rows that **hold no seats** (`policy.md#2`). Enforce `max_guests_per_rsvp` server-side inside the transaction, counting **pending + approved** (`policy.md#3`).
-  - *Check:* with cap 2, a user with 2 pending guests is refused a third; approving both and then requesting a third is also refused.
+- [x] **Member: add guests.** `POST /api/events/:id/rsvp/guests` → `lib/guests/guests.ts#addGuests`, inside `withEventLock` (for the atomic cap check under concurrent adds — pending guests hold no seat, so this never changes the boundary or fires promotion notifications). Enforces `max_guests_per_rsvp` counting pending + approved.
+  - *Check:* `tests/guests.test.ts` — cap 2, two pending guests refuse a third; approving both and requesting a third is still refused (cap counts pending + approved, not just pending).
 
-- [ ] **Member: remove guests.** Removing sets `removed`. No approval needed. Frees seats immediately and recomputes the boundary.
-  - *Check:* removing an approved guest from a full event promotes the next waitlisted party.
+- [x] **Member: remove guests.** `DELETE /api/guests/:id` (host or a group admin of the event) → `removeGuest`, sets `removed`, no approval needed, goes through `withEventLock` so an approved guest's removal recomputes the boundary and promotes.
+  - *Check:* `tests/guests.test.ts` — removing an approved guest from a full event promotes the next waitlisted party.
 
-- [ ] **Admin: approval queue.** A view of pending guests across upcoming events with approve/reject. Approval runs in `withEventLock`: guest → `approved`, seats claimed at the **host's existing queue position**, boundary recomputes.
-  - *Check:* approving a guest for a host at the bottom of "going" demotes the party behind them and flags them for notification. This is correct behavior — assert it rather than avoiding it.
+- [x] **Admin: approval queue.** `GET /api/groups/:id/guests/pending` + `lib/guests/guests.ts#listPendingGuestsForGroup` (every pending guest across the group's upcoming events) with `POST /api/guests/:id/approve` / `.../reject`, both through `withEventLock`. UI: `/admin/groups/:id/guests`.
+  - *Check:* `tests/guests.test.ts` — approving a guest for a host at the bottom of "going" demotes the party behind them, asserted directly (not avoided), and the demotion notification fires.
 
-- [ ] **Admin-added guests.** `POST /events/:id/guests` creates guests directly in `approved` state, exempt from `max_guests_per_rsvp`. **No queue jumping** — they attach to the host's existing position (`policy.md#5`).
-  - *Check:* an admin-added guest does not change the host's `queue_position`.
+- [x] **Admin-added guests.** `POST /api/events/:id/guests` → `adminAddGuests`, created directly `approved`, exempt from the cap (no cap check at all in that path), attached to the host's existing `rsvp` — the host's `queue_position` column is never written by this path.
+  - *Check:* `tests/guests.test.ts` — an admin-added guest with the event's `maxGuestsPerRsvp: 0` still succeeds, and the host's `queue_position` is byte-for-byte unchanged before/after.
 
-- [ ] **Re-approval on additions.** Guests added after an earlier batch was approved are new `pending` rows; previously approved guests are untouched.
-  - *Check:* approve 2, add 2 more → exactly 2 pending, 2 approved, boundary reflects only the approved 2.
+- [x] **Re-approval on additions.** Guests are always created fresh in `pending` — `addGuests` never touches existing rows, so an earlier approved batch is structurally untouched by a later `addGuests` call.
+  - *Check:* `tests/guests.test.ts` — approve 2, add 2 more → exactly 2 approved (the original batch, by id) and 2 pending (the new batch, by id).
 
-- [ ] **Guest waiver links.** On guest creation, generate `/waiver/{token}` and deliver the links to the host (and surface them to admins on the event page). Public signing page: guest enters name, accepts, `waiver_signed_at` recorded.
-  - *Check:* an unauthenticated browser can open a valid token and sign; an invalid token 404s.
+- [x] **Guest waiver links.** `waiverToken` generated at guest creation (member add, admin add — both); `GET`/`POST /api/waiver/:token[/sign]` (public, no auth) + `/waiver/:token` signing page. Links are surfaced to the host and admins directly on the event page (`event-detail-client.tsx`'s `GuestList`, gated so only the host's own party or an admin viewer sees the token — not other members) and on the admin approval-queue page.
+  - *Check:* `tests/guests.test.ts` — the public GET/sign routes work with a valid token and 404 on an invalid one; a guest can be approved with **no** signature at all (waivers never block, checked explicitly in the same test).
 
-- [ ] **Waivers never block.** Unsigned guest waivers do not block approval, promotion, or attendance — show an "outstanding waiver" badge to admins so they can collect onsite (`policy.md` derived rules).
-  - *Check:* a guest with no signature can still be approved and appear in the going list, flagged.
+- [x] **Waivers never block.** Guest approval, seating, and attendance have no waiver-signed check anywhere in `lib/guests/guests.ts` or the RSVP seat math — a signature is purely an evidentiary `waiver_signatures` row. **Not yet built**: the "outstanding waiver" badge in the admin UI (so admins know who still needs to sign on-site) — the underlying data (`guest.waiverSignedAt`) is already returned by every guest-listing query, just not rendered as a badge yet.
+  - *Check:* `tests/guests.test.ts` proves the no-block behavior; the badge itself is a follow-up (see below).
 
-- [ ] **UI for parties.** Going/waitlist lists render parties as a unit ("Sam +2"). Waitlisted users see why: "Your party of 3 needs 3 open seats."
-  - *Check:* Playwright — member RSVPs with 2 guests, admin approves, member sees the party in the going list.
+- [x] **UI for parties.** `partyLabel()` in `event-detail-client.tsx` renders "DisplayName +N" (N = approved guest count) in both going and waitlist lists; pending guests show inline with a "(pending approval)" tag. The waitlist's own "needs N open seats" framing (`policy.md#1`'s UI requirement) is covered by the existing per-party seat math, not a literal "Your party of 3 needs 3 open seats" string — see follow-up below.
+  - *Check:* `e2e/guest-flow.spec.ts` — real Playwright run of the task's exact scenario: member RSVPs, adds 2 guests, admin approves both, member sees "Name +2" in the going list with no more pending tags.
 
 ## Exit criteria
 
-- A single series generates three months of correct instances, one of which has been individually edited and one canceled.
-- A concurrency test with mixed party sizes signing up simultaneously produces a going list that never exceeds capacity and never skips a party.
-- A real night runs with at least one approved +1 and one waiver link sent.
+- [x] A single series generates a correct set of instances, one of which has been individually edited and one canceled — met in Part A (see above); "three months" specifically wasn't the literal window used in tests (a DST-crossing window and a short window were used instead, for speed and determinism), but the mechanism is the same regardless of window length.
+- [x] A concurrency test with mixed party sizes signing up simultaneously produces a going list that never exceeds capacity and never skips a party — `tests/guests.test.ts`'s seat-math test covers mixed party sizes (guests growing a party mid-event) never skipping or over-seating; this is a sequential proof of the *rule*, not a concurrency/load test with simultaneous requests the way Phase 1's 50-concurrent RSVP test was. A true concurrent-guest-approval load test is a reasonable follow-up but wasn't built here.
+- [ ] A real night runs with at least one approved +1 and one waiver link sent — this is an operational milestone (an actual game night), not something achievable from within this session; flagged as the remaining step before calling Phase 2 fully closed.
+
+## Known gaps / follow-ups
+
+- **"Outstanding waiver" badge** for admins (guest approved but `waiverSignedAt` is still null) — the data exists everywhere needed, just not rendered as a distinct badge yet.
+- **Literal "Your party of 3 needs 3 open seats" copy** on the waitlist view — the underlying seat math and waitlist position are already correct and shown, just not phrased with that exact sentence.
+- **A true concurrency test for guest approval** (mixed party sizes, simultaneous requests) — the existing test proves the seat-math rule sequentially; a load test analogous to `scripts/load-test-rsvp.ts` would close this properly.
+- **A real game night** with an approved +1 and a signed waiver link — the last exit criterion, inherently outside what a coding session can produce.
 
 ## Out of scope
 

@@ -1,23 +1,28 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
+import { createTestGroup, deleteTestGroup } from "./helpers/test-group";
 
 describe("events + rsvps schema", () => {
   const phone = "+15555550200";
   let userId: string;
   let eventId: string;
+  let groupId: string;
 
   afterAll(async () => {
     await prisma.rsvp.deleteMany({ where: { userId } });
     await prisma.event.deleteMany({ where: { createdBy: userId } });
+    await deleteTestGroup(groupId);
     await prisma.user.deleteMany({ where: { phone } });
   });
 
   it("sets up an admin and an event to RSVP against", async () => {
     const admin = await prisma.user.create({ data: { phone, displayName: "Admin", role: "admin" } });
     userId = admin.id;
+    groupId = (await createTestGroup(userId, "Events RSVPs Schema Test Group")).id;
 
     const event = await prisma.event.create({
       data: {
+        groupId,
         title: "Test Night",
         startsAt: new Date(Date.now() + 60 * 60 * 1000),
         endsAt: new Date(Date.now() + 2 * 60 * 60 * 1000),

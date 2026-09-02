@@ -2,6 +2,8 @@ import { withEventLock } from "./with-event-lock";
 import {
   AlreadyRsvpedError,
   EventCanceledError,
+  EventNotFoundError,
+  GroupWaiverNotAcceptedError,
   RsvpNotFoundError,
   SignupNotOpenError,
   UserBannedError,
@@ -16,6 +18,13 @@ import type { Rsvp } from "@/lib/generated/prisma/client";
 // check and the write.
 export function createRsvp(eventId: string, userId: string): Promise<Rsvp> {
   return withEventLock(eventId, async (tx, event) => {
+    // Group membership gates everything else — a non-member must see this
+    // exactly like a nonexistent event (architecture.md#groups--tenancy).
+    const membership = await tx.groupMembership.findUnique({
+      where: { groupId_userId: { groupId: event.groupId, userId } },
+    });
+    if (!membership || membership.status !== "active") throw new EventNotFoundError();
+
     if (event.status === "canceled") throw new EventCanceledError();
 
     // Server time only — never trust a client-supplied timestamp
@@ -25,6 +34,15 @@ export function createRsvp(eventId: string, userId: string): Promise<Rsvp> {
     const user = await tx.user.findUniqueOrThrow({ where: { id: userId } });
     if (user.bannedAt) throw new UserBannedError();
     if (user.waiverVersion !== WAIVER_VERSION) throw new WaiverNotAcceptedError();
+
+    // The group's own waiver, on top of the platform one above — only
+    // gates when this event/series opted in (policy.md#6).
+    if (event.waiverRequired) {
+      const group = await tx.group.findUniqueOrThrow({ where: { id: event.groupId } });
+      if (group.waiverVersion === null || membership.groupWaiverVersionAccepted !== group.waiverVersion) {
+        throw new GroupWaiverNotAcceptedError();
+      }
+    }
 
     const existing = await tx.rsvp.findFirst({ where: { eventId, userId, status: "active" } });
     if (existing) throw new AlreadyRsvpedError();
@@ -52,6 +70,11 @@ export function createRsvp(eventId: string, userId: string): Promise<Rsvp> {
 // `actorUserId` defaults to `userId` (a self-cancel) but can be a different
 // user — an admin removing someone else's RSVP goes through this same path
 // (same promotion behavior), just with a different actor on the log row.
+// No group-membership gate here (unlike createRsvp): canceling an existing
+// RSVP must keep working even if the member's group standing changed since
+// they signed up (e.g. an admin-removal flow, or a lapsed membership) — the
+// RsvpNotFoundError below already hides a nonexistent/foreign RSVP from
+// anyone who was never a member, since they'd have no row to find.
 export function cancelRsvp(eventId: string, userId: string, actorUserId: string = userId): Promise<Rsvp> {
   return withEventLock(eventId, async (tx) => {
     const rsvp = await tx.rsvp.findFirst({ where: { eventId, userId, status: "active" } });

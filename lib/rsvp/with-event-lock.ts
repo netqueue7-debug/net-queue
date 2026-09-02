@@ -1,5 +1,7 @@
 import { prisma } from "@/lib/db";
 import { computeDerivedStatuses, type DerivedStatus } from "./seat-math";
+import { getApprovedGuestCounts, seatsFor } from "./seats";
+import { enqueueNotification, dispatchNotifications } from "@/lib/notifications/notifications";
 import type { Event, Prisma } from "@/lib/generated/prisma/client";
 
 export interface StatusChange {
@@ -15,8 +17,15 @@ async function snapshotStatuses(tx: Prisma.TransactionClient, eventId: string, c
     select: { id: true, userId: true, queuePosition: true },
   });
 
+  // seats(rsvp) = 1 + approved guest count (policy.md#1/#2) — Phase 1 had
+  // no guests, so this was always 1; Phase 2 computes it for real.
+  const guestCounts = await getApprovedGuestCounts(
+    tx,
+    activeRsvps.map((r) => r.id),
+  );
+
   const statuses = computeDerivedStatuses(
-    activeRsvps.map((r) => ({ id: r.id, queuePosition: r.queuePosition, seats: 1 })),
+    activeRsvps.map((r) => ({ id: r.id, queuePosition: r.queuePosition, seats: seatsFor(r.id, guestCounts) })),
     capacity,
   );
 
@@ -28,14 +37,16 @@ async function snapshotStatuses(tx: Prisma.TransactionClient, eventId: string, c
 // architecture.md#the-critical-section. Do not write ad-hoc transactions
 // for RSVP mutations (conventions.md#transactions).
 //
-// Notifications are computed inside the transaction (so the diff sees a
-// consistent before/after pair) but dispatched only after commit, and a
-// dispatch failure must never roll back the mutation — see below.
+// Notifications are enqueued (as real `Notification` rows) inside the
+// transaction — so the diff sees a consistent before/after pair and the
+// row is part of the same atomic mutation — but dispatched (actually sent)
+// only after commit, and a dispatch failure must never roll back the
+// mutation — see lib/notifications/notifications.ts.
 export async function withEventLock<T>(
   eventId: string,
   callback: (tx: Prisma.TransactionClient, event: Event) => Promise<T>,
 ): Promise<T> {
-  const changes: StatusChange[] = [];
+  const notificationIds: string[] = [];
 
   const result = await prisma.$transaction(
     async (tx) => {
@@ -63,7 +74,19 @@ export async function withEventLock<T>(
       for (const [id, from] of before.statuses) {
         const to = after.statuses.get(id);
         if (to !== undefined && to !== from) {
-          changes.push({ rsvpId: id, userId: userIdByRsvpId.get(id)!, from, to });
+          const userId = userIdByRsvpId.get(id)!;
+          const notification = await enqueueNotification(tx, {
+            userId,
+            eventId,
+            type: to === "going" ? "rsvp_promoted" : "rsvp_demoted",
+            payload: {
+              rsvpId: id,
+              eventTitle: eventAfter.title,
+              startsAt: eventAfter.startsAt.toISOString(),
+              timezone: eventAfter.timezone,
+            },
+          });
+          notificationIds.push(notification.id);
         }
       }
 
@@ -76,17 +99,7 @@ export async function withEventLock<T>(
     { maxWait: 10_000, timeout: 30_000 },
   );
 
-  for (const change of changes) {
-    dispatchStatusChangeNotification(change);
-  }
+  await dispatchNotifications(notificationIds);
 
   return result;
-}
-
-// Phase 1: no-op logger. Real SMS dispatch is Phase 3
-// (architecture.md#cross-cutting-concerns — "Promotion SMS must be
-// idempotent and best-effort — a failed send never rolls back the queue
-// mutation," which this satisfies by construction: it only runs after commit).
-function dispatchStatusChangeNotification(change: StatusChange): void {
-  console.log(`[notify] rsvp ${change.rsvpId} (user ${change.userId}): ${change.from} -> ${change.to}`);
 }

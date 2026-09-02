@@ -8,6 +8,7 @@ function fakeUser(overrides: Partial<User>): User {
     id: "u1",
     phone: "+15555550199",
     displayName: "Sam",
+    avatarUrl: null,
     role: "member",
     waiverAcceptedAt: new Date(),
     waiverVersion: WAIVER_VERSION,
