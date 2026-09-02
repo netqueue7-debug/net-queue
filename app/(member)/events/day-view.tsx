@@ -5,14 +5,15 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { GROUP_DOT_CLASS, groupColorTone } from "@/components/calendar/group-color";
 import type { EventChip } from "@/components/calendar/event-chip";
 
-export function DayView({ events }: { events: EventChip[] }) {
+export function DayView({ events, backHref }: { events: EventChip[]; backHref: string }) {
   if (events.length === 0) return <EmptyState>No events this day.</EmptyState>;
+  const fromParam = `from=${encodeURIComponent(backHref)}`;
 
   return (
     <ul className="flex flex-col gap-2">
       {events.map((e) => (
         <li key={e.id}>
-          <Link href={`/events/${e.id}`} className="block">
+          <Link href={`/events/${e.id}?${fromParam}`} className="block">
             <Card className="transition-shadow hover:shadow-md">
               <p className="truncate font-medium">{e.title}</p>
               <p className="text-sm text-muted">

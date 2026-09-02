@@ -188,6 +188,11 @@ model GroupMembership {
   groupWaiverAcceptedAt      DateTime?             @map("group_waiver_accepted_at")
   groupWaiverVersionAccepted Int?                  @map("group_waiver_version_accepted")
   joinedAt                   DateTime              @default(now()) @map("joined_at")
+  // Per-user manual ordering of their own /groups card list — defaults to 0
+  // for every existing row, so listMyMemberships's `[sortOrder asc, joinedAt
+  // asc]` order is unchanged until a user actually drags a card, at which
+  // point only *their* memberships get distinct values.
+  sortOrder                  Int                   @default(0) @map("sort_order")
 
   group Group @relation(fields: [groupId], references: [id])
   user  User  @relation(fields: [userId], references: [id])

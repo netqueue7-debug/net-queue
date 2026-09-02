@@ -19,7 +19,7 @@ Load only what the task needs. Do not read every file.
 | `docs/phase-2-recurrence-guests.md` | Recurring series, +1 lifecycle, admin approval, guest waivers. |
 | `docs/phase-3-polish.md` | Notifications, admin dashboard, event log, ops. |
 
-**Current phase: Phase 0b (groups/multi-tenancy retrofit).** Phase 0 and Phase 1 are complete. Work in phase order. Do not build ahead of the current phase — later-phase concerns are deliberately deferred and building them early creates rework.
+**Current phase: Phase 3 (polish & operations).** Phase 0, Phase 1, Phase 2, and Phase 0b are good — each phase doc's own checklist tracks its small remaining known gaps/follow-ups, none of which block moving on. Work in phase order. Do not build ahead of the current phase — later-phase concerns are deliberately deferred and building them early creates rework.
 
 ## Invariants — never violate these
 

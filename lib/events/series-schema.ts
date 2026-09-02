@@ -16,6 +16,11 @@ export const createSeriesSchema = z
     startTime: timeOfDay,
     endTime: timeOfDay,
     timezone,
+    // Calendar date only ("YYYY-MM-DD") — the first local date, in
+    // `timezone`, that can have an occurrence. Optional at the service
+    // layer (lib/events/series.ts#createSeries defaults to "today" when
+    // omitted) but required here since the form always sends one.
+    recurStartsAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD."),
     // Calendar date only ("YYYY-MM-DD") — the last local date, in
     // `timezone`, that can have an occurrence. Converted to a concrete
     // instant inside lib/events/series.ts#createSeries.
@@ -36,6 +41,10 @@ export const createSeriesSchema = z
     message: "endTime must be after startTime (same-day events only — no overnight series instances).",
     path: ["endTime"],
   })
+  .refine((v) => v.recurStartsAt <= v.recurUntil, {
+    message: "recurStartsAt must be on or before recurUntil.",
+    path: ["recurStartsAt"],
+  })
   .refine((v) => v.signupOpensRule !== "days_before" || v.signupOpensDaysBefore != null, {
     message: "signupOpensDaysBefore is required when signupOpensRule is days_before.",
     path: ["signupOpensDaysBefore"],
@@ -54,7 +63,7 @@ export const createSeriesSchema = z
     locationRevealHours: v.locationRevealHours ?? null,
   }));
 
-// Deliberately excludes weekdays/startTime/endTime/timezone/recurUntil —
+// Deliberately excludes weekdays/startTime/endTime/timezone/recurStartsAt/recurUntil —
 // the series' schedule shape is fixed at creation for this phase (changing
 // it would mean reconciling already-materialized future instances against
 // a new pattern, which is its own feature; "extend the horizon" is

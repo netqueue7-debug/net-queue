@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea, Select } from "@/components/ui/inputs";
 import { ErrorText } from "@/components/ui/text";
+import { US_TIMEZONES } from "@/lib/us-timezones";
 
 export interface EventFormInitialValues {
   title: string;
@@ -41,6 +42,10 @@ export interface EventFormBody {
   locationRevealHours: number | null;
 }
 
+const sectionHeaderClass = "text-sm font-semibold text-muted";
+const sectionClass = "flex flex-col gap-3 border-t border-border pt-4 first:border-t-0 first:pt-0";
+const fieldLabelClass = "flex flex-col gap-1 text-sm";
+
 export function EventForm({
   initialValues,
   submitLabel,
@@ -56,6 +61,14 @@ export function EventForm({
 }) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Only offered on create — editing keeps the plain absolute field below,
+  // since a materialized event has no persisted "rule" to re-derive a
+  // sensible default from, unlike a series (see docs/phase-2 notes on
+  // signupOpensRule being series-only).
+  const [signupOpensMode, setSignupOpensMode] = useState<"immediately" | "days_before">("immediately");
+
+  const iv = initialValues;
+  const isEditing = iv !== undefined;
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -70,17 +83,24 @@ export function EventForm({
     const capacityRaw = form.get("capacity") as string;
     const maxGuestsRaw = form.get("maxGuestsPerRsvp") as string;
     const revealHoursRaw = form.get("locationRevealHours") as string;
+    const startsAt = new Date(form.get("startsAt") as string);
+
+    const signupOpensAt = isEditing
+      ? new Date(form.get("signupOpensAt") as string)
+      : signupOpensMode === "immediately"
+        ? new Date()
+        : new Date(startsAt.getTime() - Number(form.get("signupOpensDaysBefore") as string) * 24 * 60 * 60 * 1000);
 
     const body: EventFormBody = {
       title: form.get("title"),
       description: (form.get("description") as string) || null,
-      startsAt: new Date(form.get("startsAt") as string).toISOString(),
+      startsAt: startsAt.toISOString(),
       endsAt: new Date(form.get("endsAt") as string).toISOString(),
       timezone: form.get("timezone"),
       capacity: capacityRaw ? Number(capacityRaw) : null,
       maxGuestsPerRsvp: maxGuestsRaw ? Number(maxGuestsRaw) : null,
       waiverRequired: form.get("waiverRequired") === "on",
-      signupOpensAt: new Date(form.get("signupOpensAt") as string).toISOString(),
+      signupOpensAt: signupOpensAt.toISOString(),
       generalLocation: (form.get("generalLocation") as string) || null,
       exactLocation: (form.get("exactLocation") as string) || null,
       googleMapsUrl: (form.get("googleMapsUrl") as string) || null,
@@ -102,56 +122,91 @@ export function EventForm({
     }
   }
 
-  const iv = initialValues;
-
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-      <Input name="title" placeholder="Title" required defaultValue={iv?.title} />
-      <Textarea name="description" placeholder="Description (optional)" defaultValue={iv?.description} />
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+      <div className={sectionClass}>
+        <h3 className={sectionHeaderClass}>Basics</h3>
+        <Input name="title" placeholder="Title" required defaultValue={iv?.title} />
+        <Textarea name="description" placeholder="Description (optional)" defaultValue={iv?.description} />
+      </div>
 
-      <label className="flex flex-col gap-1 text-sm">
-        Starts at
-        <Input name="startsAt" type="datetime-local" required defaultValue={iv?.startsAt} />
-      </label>
-      <label className="flex flex-col gap-1 text-sm">
-        Ends at
-        <Input name="endsAt" type="datetime-local" required defaultValue={iv?.endsAt} />
-      </label>
-      <label className="flex flex-col gap-1 text-sm">
-        Signup opens at
-        <Input name="signupOpensAt" type="datetime-local" required defaultValue={iv?.signupOpensAt} />
-      </label>
+      <div className={sectionClass}>
+        <h3 className={sectionHeaderClass}>Schedule</h3>
+        <label className={fieldLabelClass}>
+          Starts at
+          <Input name="startsAt" type="datetime-local" required defaultValue={iv?.startsAt} />
+        </label>
+        <label className={fieldLabelClass}>
+          Ends at
+          <Input name="endsAt" type="datetime-local" required defaultValue={iv?.endsAt} />
+        </label>
+        <label className={fieldLabelClass}>
+          Timezone
+          <Select name="timezone" defaultValue={iv?.timezone ?? "America/New_York"} required>
+            {US_TIMEZONES.map((tz) => (
+              <option key={tz.value} value={tz.value}>
+                {tz.label}
+              </option>
+            ))}
+          </Select>
+        </label>
 
-      <Input name="timezone" defaultValue={iv?.timezone ?? "America/New_York"} required />
-      <Input name="capacity" type="number" placeholder="Capacity (blank = unlimited)" defaultValue={iv?.capacity} />
-      <Input
-        name="maxGuestsPerRsvp"
-        type="number"
-        placeholder="Max guests per RSVP (blank = unlimited)"
-        defaultValue={iv?.maxGuestsPerRsvp}
-      />
-      <label className="flex items-center gap-2 text-sm">
-        <input name="waiverRequired" type="checkbox" defaultChecked={iv?.waiverRequired} />
-        Require this group&apos;s waiver to RSVP
-      </label>
+        {isEditing ? (
+          <label className={fieldLabelClass}>
+            Signup opens at
+            <Input name="signupOpensAt" type="datetime-local" required defaultValue={iv.signupOpensAt} />
+          </label>
+        ) : (
+          <>
+            <label className={fieldLabelClass}>
+              Signup opens
+              <Select value={signupOpensMode} onChange={(e) => setSignupOpensMode(e.target.value as "immediately" | "days_before")}>
+                <option value="immediately">Immediately (as soon as this event is created)</option>
+                <option value="days_before">A fixed number of days before it starts</option>
+              </Select>
+            </label>
+            {signupOpensMode === "days_before" && (
+              <Input name="signupOpensDaysBefore" type="number" min={1} placeholder="Days before start" required />
+            )}
+          </>
+        )}
+      </div>
 
-      <Input name="generalLocation" placeholder="General location" defaultValue={iv?.generalLocation} />
-      <Input name="exactLocation" placeholder="Exact location" defaultValue={iv?.exactLocation} />
-      <Input name="googleMapsUrl" type="url" placeholder="Google Maps link (optional)" defaultValue={iv?.googleMapsUrl} />
-      <Input name="appleMapsUrl" type="url" placeholder="Apple Maps link (optional)" defaultValue={iv?.appleMapsUrl} />
+      <div className={sectionClass}>
+        <h3 className={sectionHeaderClass}>Capacity &amp; guests</h3>
+        <Input name="capacity" type="number" placeholder="Capacity (blank = unlimited)" defaultValue={iv?.capacity} />
+        <Input
+          name="maxGuestsPerRsvp"
+          type="number"
+          placeholder="Max guests per RSVP (blank = unlimited)"
+          defaultValue={iv?.maxGuestsPerRsvp}
+        />
+        <label className="flex items-center gap-2 text-sm">
+          <input name="waiverRequired" type="checkbox" defaultChecked={iv?.waiverRequired} />
+          Require this group&apos;s waiver to RSVP
+        </label>
+      </div>
 
-      <Select name="locationRevealPolicy" defaultValue={iv?.locationRevealPolicy ?? "always"}>
-        <option value="always">Always visible</option>
-        <option value="hours_before">Hours before start</option>
-        <option value="day_of">Day of event</option>
-        <option value="hidden">Hidden until day of</option>
-      </Select>
-      <Input
-        name="locationRevealHours"
-        type="number"
-        placeholder="Reveal hours before (if applicable)"
-        defaultValue={iv?.locationRevealHours}
-      />
+      <div className={sectionClass}>
+        <h3 className={sectionHeaderClass}>Location</h3>
+        <Input name="generalLocation" placeholder="General location" defaultValue={iv?.generalLocation} />
+        <Input name="exactLocation" placeholder="Exact location" defaultValue={iv?.exactLocation} />
+        <Input name="googleMapsUrl" type="url" placeholder="Google Maps link (optional)" defaultValue={iv?.googleMapsUrl} />
+        <Input name="appleMapsUrl" type="url" placeholder="Apple Maps link (optional)" defaultValue={iv?.appleMapsUrl} />
+
+        <Select name="locationRevealPolicy" defaultValue={iv?.locationRevealPolicy ?? "always"}>
+          <option value="always">Always visible</option>
+          <option value="hours_before">Hours before start</option>
+          <option value="day_of">Day of event</option>
+          <option value="hidden">Hidden until day of</option>
+        </Select>
+        <Input
+          name="locationRevealHours"
+          type="number"
+          placeholder="Reveal hours before (if applicable)"
+          defaultValue={iv?.locationRevealHours}
+        />
+      </div>
 
       {error && <ErrorText>{error}</ErrorText>}
 

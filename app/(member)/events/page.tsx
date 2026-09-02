@@ -185,9 +185,15 @@ export default async function EventsPage({
         <h2 className="text-sm font-medium text-muted">{title}</h2>
       </div>
 
-      {view === "month" && <MonthView anchor={anchor} eventsByDay={eventsByDay} groupFilter={selectedGroupId} />}
-      {view === "week" && <WeekView anchor={anchor} eventsByDay={eventsByDay} />}
-      {view === "day" && <DayView events={eventsByDay.get(dateKey(anchor)) ?? []} />}
+      {view === "month" && (
+        <MonthView anchor={anchor} eventsByDay={eventsByDay} groupFilter={selectedGroupId} backHref={hrefFor(view, anchor, selectedGroupId)} />
+      )}
+      {view === "week" && (
+        <WeekView anchor={anchor} eventsByDay={eventsByDay} backHref={hrefFor(view, anchor, selectedGroupId)} />
+      )}
+      {view === "day" && (
+        <DayView events={eventsByDay.get(dateKey(anchor)) ?? []} backHref={hrefFor(view, anchor, selectedGroupId)} />
+      )}
     </main>
   );
 }

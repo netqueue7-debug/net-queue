@@ -26,6 +26,10 @@ export const updateMembershipRoleSchema = z.object({
   role: z.enum(["member", "admin"]),
 });
 
+export const reorderMembershipsSchema = z.object({
+  groupIds: z.array(z.string().min(1)).min(1),
+});
+
 // Deliberately its own schema/endpoint, not folded into updateGroupSchema —
 // that route only requires group-admin, and a group admin raising their
 // own member limit would defeat the point (platform-admin-only, see

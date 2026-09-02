@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Suspense, useRef, useState } from "react";
 import Script from "next/script";
 import { Button } from "@/components/ui/button";
@@ -29,7 +29,6 @@ export default function LoginPage() {
 }
 
 function LoginPageInner() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   // Carries a `/join/:code` (or any other) destination through the OTP
   // round-trip — see docs/phase-0b-groups.md's "single entry point" task.
@@ -98,8 +97,12 @@ function LoginPageInner() {
 
       const body = await res.json();
       const onboardingUrl = next ? `/onboarding?next=${encodeURIComponent(next)}` : "/onboarding";
-      router.push(body.needsOnboarding ? onboardingUrl : (next ?? "/home"));
-      router.refresh();
+      // A hard navigation (not router.push + router.refresh) so the shared
+      // root layout's Nav re-renders with the freshly-set session cookie.
+      // The cookie is set by a Route Handler, not a Server Action, so Next
+      // doesn't auto-invalidate the client router cache for it — see the
+      // login flow investigation in project history for the race this avoids.
+      window.location.href = body.needsOnboarding ? onboardingUrl : (next ?? "/home");
     } finally {
       setLoading(false);
     }
@@ -134,7 +137,16 @@ function LoginPageInner() {
       {step === "code" && (
         <form onSubmit={handleVerifyCode} className="flex w-full max-w-sm flex-col gap-4">
           <Field label="Verification code" htmlFor="code">
-            <Input id="code" type="text" required value={code} onChange={(e) => setCode(e.target.value)} placeholder="123456" />
+            <Input
+              id="code"
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              required
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              placeholder="123456"
+            />
           </Field>
           {error && <ErrorText>{error}</ErrorText>}
           <Button type="submit" loading={loading}>

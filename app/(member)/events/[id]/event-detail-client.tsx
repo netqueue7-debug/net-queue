@@ -13,6 +13,7 @@ import { ErrorText, HelperText } from "@/components/ui/text";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Linkify } from "@/components/ui/linkify";
 import { LogIcon, PencilIcon, TrashIcon } from "@/components/ui/icons";
+import { GROUP_CHIP_CLASS, GROUP_DOT_CLASS, groupColorTone } from "@/components/calendar/group-color";
 import { EventComments } from "./event-comments";
 
 function toDatetimeLocal(iso: string): string {
@@ -54,11 +55,15 @@ export function EventDetailClient({
   viewerRole,
   viewerUserId,
   eventId,
+  backHref,
 }: {
   detail: EventDetail;
   viewerRole: "member" | "admin";
   viewerUserId: string;
   eventId: string;
+  // The calendar view this event was opened from, if any — null when
+  // reached some other way (home page, notifications, admin links).
+  backHref: string | null;
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -130,7 +135,7 @@ export function EventDetailClient({
     return { ok: true };
   }
 
-  const { event, going, waitlist, canceled, yourRsvp } = detail;
+  const { event, group, going, waitlist, canceled, yourRsvp } = detail;
   const signupOpen = new Date() >= new Date(event.signupOpensAt);
   const hasActiveRsvp = yourRsvp.status === "going" || yourRsvp.status === "waitlist";
   const shownLocation = event.exactLocation ?? event.generalLocation;
@@ -191,7 +196,20 @@ export function EventDetailClient({
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 p-4 sm:p-8">
+      {backHref && (
+        <Link href={backHref} className="w-fit text-sm text-muted hover:underline">
+          ← Back to calendar
+        </Link>
+      )}
+
       <div>
+        <Link
+          href={`/groups/${group.id}/calendar`}
+          className={`mb-2 inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${GROUP_CHIP_CLASS[groupColorTone(group.id)]}`}
+        >
+          <span className={`h-1.5 w-1.5 rounded-full ${GROUP_DOT_CLASS[groupColorTone(group.id)]}`} />
+          {group.name}
+        </Link>
         <div className="flex flex-wrap items-start justify-between gap-2">
           <h1 className="text-2xl font-semibold">{event.title}</h1>
           {event.status !== "canceled" && (
@@ -216,50 +234,15 @@ export function EventDetailClient({
       </div>
 
       {event.description && (
-        <p className="whitespace-pre-wrap text-sm">
-          <Linkify text={event.description} />
-        </p>
-      )}
-
-      {!hasActiveRsvp && (
         <div>
-          <Button onClick={handleRsvp} disabled={loading || event.status === "canceled" || !signupOpen} loading={loading}>
-            RSVP
-          </Button>
-          {!signupOpen && event.status !== "canceled" && (
-            <HelperText>Signup isn&apos;t open yet — opens {formatDateTime(event.signupOpensAt, event.timezone)}.</HelperText>
-          )}
+          <p className="text-sm font-bold">Description</p>
+          <p className="whitespace-pre-wrap text-base">
+            <Linkify text={event.description} />
+          </p>
         </div>
       )}
 
-      {hasActiveRsvp && (
-        <div>
-          {yourRsvp.status === "waitlist" && (
-            <HelperText>
-              You&apos;re #{yourRsvp.queuePosition} on the waitlist. Your party needs enough open seats for everyone to be seated
-              together.
-            </HelperText>
-          )}
-          {event.maxGuestsPerRsvp !== null && (
-            <HelperText>
-              Up to {event.maxGuestsPerRsvp} guest{event.maxGuestsPerRsvp === 1 ? "" : "s"} per RSVP.
-            </HelperText>
-          )}
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-            <Input
-              value={guestNames}
-              onChange={(e) => setGuestNames(e.target.value)}
-              placeholder="Guest names, comma separated (optional)"
-              className="flex-1 text-sm"
-            />
-            <Button variant="secondary" onClick={handleAddGuests} disabled={loading} className="text-sm">
-              Add guest
-            </Button>
-          </div>
-        </div>
-      )}
-
-      <section>
+      <section className="border-t border-border pt-5">
         <h2 className="font-medium">Going ({headcount(going)})</h2>
         <ul className="flex flex-col gap-1 text-sm">
           {going.map((r) => (
@@ -310,17 +293,56 @@ export function EventDetailClient({
         </section>
       )}
 
-      <div className="border-t border-border pt-5">
-        <EventComments eventId={eventId} comments={detail.comments} viewerUserId={viewerUserId} viewerRole={viewerRole} />
-      </div>
+      {hasActiveRsvp && (
+        <div>
+          <h2 className="font-medium">Bring Guests</h2>
+          {event.maxGuestsPerRsvp !== null && (
+            <HelperText>
+              Up to {event.maxGuestsPerRsvp} guest{event.maxGuestsPerRsvp === 1 ? "" : "s"} per RSVP.
+            </HelperText>
+          )}
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <Input
+              value={guestNames}
+              onChange={(e) => setGuestNames(e.target.value)}
+              placeholder="Guest names, comma separated (optional)"
+              className="flex-1 text-sm"
+            />
+            <Button variant="secondary" onClick={handleAddGuests} disabled={loading} className="text-sm">
+              Add guest
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {!hasActiveRsvp && (
+        <div>
+          <Button onClick={handleRsvp} disabled={loading || event.status === "canceled" || !signupOpen} loading={loading}>
+            RSVP
+          </Button>
+          {!signupOpen && event.status !== "canceled" && (
+            <HelperText>Signup isn&apos;t open yet — opens {formatDateTime(event.signupOpensAt, event.timezone)}.</HelperText>
+          )}
+        </div>
+      )}
 
       {hasActiveRsvp && (
-        <div className="border-t border-border pt-5">
+        <div>
+          {yourRsvp.status === "waitlist" && (
+            <HelperText>
+              You&apos;re #{yourRsvp.queuePosition} on the waitlist. Your party needs enough open seats for everyone to be seated
+              together.
+            </HelperText>
+          )}
           <Button variant="secondary" onClick={handleCancel} disabled={loading}>
             Cancel RSVP
           </Button>
         </div>
       )}
+
+      <div className="border-t border-border pt-5">
+        <EventComments eventId={eventId} comments={detail.comments} viewerUserId={viewerUserId} viewerRole={viewerRole} />
+      </div>
 
       {viewerRole === "admin" && (
         <div className="flex flex-wrap items-center gap-2 border-t border-border pt-5">

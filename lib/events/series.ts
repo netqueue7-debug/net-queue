@@ -12,6 +12,11 @@ export interface CreateSeriesInput {
   startTime: string;
   endTime: string;
   timezone: string;
+  // "YYYY-MM-DD", local to `timezone` — optional so existing direct
+  // (non-HTTP) callers keep working unchanged; defaults to "today" (the
+  // previous, only behavior) when omitted. The real form/API path always
+  // sends one (required in createSeriesSchema).
+  recurStartsAt?: string;
   recurUntil: string; // "YYYY-MM-DD", local to `timezone`
   signupOpensRule: "immediately" | "days_before";
   signupOpensDaysBefore: number | null;
@@ -26,18 +31,20 @@ export interface CreateSeriesInput {
   locationRevealHours: number | null;
 }
 
-// Creates the series row and materializes every occurrence from *now*
-// through `recurUntil` up front (docs/phase-2-recurrence-guests.md — no
-// rolling/lazy generation). `recurUntil` is anchored to local noon before
-// storage so later comparisons via `zonedDateString` are never thrown off
-// by a UTC-midnight boundary landing on the previous local calendar day
-// (see tests/recurrence.test.ts for why that matters).
+// Creates the series row and materializes every occurrence from
+// `recurStartsAt` (default: today) through `recurUntil` up front
+// (docs/phase-2-recurrence-guests.md — no rolling/lazy generation).
+// `recurUntil`/`recurStartsAt` are anchored to local noon before use so
+// later comparisons via `zonedDateString` are never thrown off by a
+// UTC-midnight boundary landing on the previous local calendar day (see
+// tests/recurrence.test.ts for why that matters).
 export async function createSeries(
   createdBy: string,
   input: CreateSeriesInput,
 ): Promise<{ series: EventSeries; eventsCreated: number }> {
   const materializedAt = new Date();
   const recurUntilInstant = zonedTimeToUtc(input.recurUntil, "12:00", input.timezone);
+  const recurStartsAtInstant = input.recurStartsAt ? zonedTimeToUtc(input.recurStartsAt, "12:00", input.timezone) : materializedAt;
 
   return prisma.$transaction(async (tx) => {
     const series = await tx.eventSeries.create({
@@ -65,7 +72,7 @@ export async function createSeries(
       },
     });
 
-    const occurrences = generateOccurrenceDates(series.weekdays, series.timezone, materializedAt, series.recurUntil);
+    const occurrences = generateOccurrenceDates(series.weekdays, series.timezone, recurStartsAtInstant, series.recurUntil);
     const eventsData = occurrences.map((occurrence) => {
       const { startsAt, endsAt, signupOpensAt } = materializeOccurrence(series, occurrence, materializedAt);
       return {

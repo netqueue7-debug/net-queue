@@ -4,6 +4,7 @@ import { needsOnboarding } from "@/lib/auth/onboarding";
 import { countUnreadNotifications } from "@/lib/notifications/notifications";
 import { getDefaultAdminGroupId } from "@/lib/groups/authz";
 import { CalendarIcon, UsersIcon, BellIcon, ShieldIcon } from "./icons";
+import { AvatarMenu } from "./avatar-menu";
 
 const linkClass =
   "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium text-muted transition-colors hover:bg-accent/8 hover:text-foreground";
@@ -47,18 +48,7 @@ export async function Nav() {
               <span className="hidden sm:inline">Admin</span>
             </Link>
           )}
-          <Link
-            href="/settings"
-            title="Settings"
-            className="ml-1 flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-accent/10 text-sm font-semibold text-accent ring-offset-2 ring-offset-background transition-shadow hover:ring-2 hover:ring-accent/40"
-          >
-            {user.avatarUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element -- external Vercel Blob URL, not worth an Image remotePatterns entry
-              <img src={user.avatarUrl} alt="" className="h-full w-full object-cover" />
-            ) : (
-              initial
-            )}
-          </Link>
+          <AvatarMenu avatarUrl={user.avatarUrl} initial={initial} />
         </div>
       </nav>
     </header>
