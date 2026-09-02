@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
-import { createSeries, cancelSeries, updateSeries } from "@/lib/events/series";
+import { createSeries, cancelSeries, cancelSeriesWeekday, updateSeries } from "@/lib/events/series";
 import { createRsvp } from "@/lib/rsvp/rsvp";
+import { zonedWeekday } from "@/lib/timezone";
 import { computeDerivedStatuses } from "@/lib/rsvp/seat-math";
 import { WAIVER_VERSION } from "@/lib/waivers/content";
 import { addActiveMembership, createTestGroup, deleteTestGroup } from "./helpers/test-group";
@@ -37,6 +38,7 @@ describe("event series", () => {
     "+15555550602",
     "+15555550603",
     "+15555550604",
+    "+15555550605",
   ];
   let adminId: string;
   let groupId: string;
@@ -258,6 +260,69 @@ describe("event series", () => {
       where: { eventId: overriddenInstance.id, userId: member.id, type: "event_canceled" },
     });
     expect(notification).not.toBeNull();
+  });
+
+  it("cancelSeriesWeekday: cancels only the given weekday's future instances, including overridden ones, and drops it from series.weekdays", async () => {
+    const memberPhone = "+15555550605";
+    const member = await prisma.user.create({
+      data: { phone: memberPhone, waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+    });
+    await addActiveMembership(groupId, member.id);
+
+    const { series } = await createSeries(adminId, {
+      groupId,
+      title: "Weekday Cancellation Series",
+      description: null,
+      weekdays: [2, 4], // Tue, Thu
+      startTime: "19:00",
+      endTime: "22:00",
+      timezone: "America/New_York",
+      recurUntil: daysFromNow(21, "America/New_York"),
+      signupOpensRule: "immediately",
+      signupOpensDaysBefore: null,
+      capacity: 10,
+      maxGuestsPerRsvp: null,
+      waiverRequired: false,
+      generalLocation: null,
+      exactLocation: null,
+      googleMapsUrl: null,
+      appleMapsUrl: null,
+      locationRevealPolicy: "always",
+      locationRevealHours: null,
+    });
+
+    const instances = await prisma.event.findMany({ where: { seriesId: series.id }, orderBy: { startsAt: "asc" } });
+    const tuesdays = instances.filter((e) => zonedWeekday(e.startsAt, e.timezone) === 2);
+    const thursdays = instances.filter((e) => zonedWeekday(e.startsAt, e.timezone) === 4);
+    expect(tuesdays.length).toBeGreaterThan(0);
+    expect(thursdays.length).toBeGreaterThan(0);
+
+    // Hand-edit one Thursday and RSVP a member to it — cancelSeriesWeekday
+    // should cancel it anyway and still notify the RSVP'd member.
+    const overriddenThursday = thursdays[0];
+    await prisma.event.update({ where: { id: overriddenThursday.id }, data: { overridden: true } });
+    await createRsvp(overriddenThursday.id, member.id);
+
+    const { canceledCount } = await cancelSeriesWeekday(series.id, 4, adminId);
+    expect(canceledCount).toBe(thursdays.length);
+
+    const refetched = await prisma.event.findMany({ where: { seriesId: series.id } });
+    const byId = new Map(refetched.map((e) => [e.id, e]));
+
+    for (const tue of tuesdays) {
+      expect(byId.get(tue.id)?.status).toBe("scheduled"); // untouched — different weekday
+    }
+    for (const thu of thursdays) {
+      expect(byId.get(thu.id)?.status).toBe("canceled"); // canceled, including the overridden one
+    }
+
+    const notification = await prisma.notification.findFirst({
+      where: { eventId: overriddenThursday.id, userId: member.id, type: "event_canceled" },
+    });
+    expect(notification).not.toBeNull();
+
+    const refetchedSeries = await prisma.eventSeries.findUniqueOrThrow({ where: { id: series.id } });
+    expect(refetchedSeries.weekdays).toEqual([2]); // Thursday dropped, Tuesday remains
   });
 
   it("recurStartsAt controls the earliest materialized instance, not just recurUntil", async () => {

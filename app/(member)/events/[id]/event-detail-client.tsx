@@ -15,6 +15,7 @@ import { Linkify } from "@/components/ui/linkify";
 import { LogIcon, PencilIcon, TrashIcon } from "@/components/ui/icons";
 import { GROUP_CHIP_CLASS, GROUP_DOT_CLASS, groupColorTone } from "@/components/calendar/group-color";
 import { EventComments } from "./event-comments";
+import { SeriesActions } from "./series-actions";
 
 function toDatetimeLocal(iso: string): string {
   const d = new Date(iso);
@@ -135,7 +136,7 @@ export function EventDetailClient({
     return { ok: true };
   }
 
-  const { event, group, going, waitlist, canceled, yourRsvp } = detail;
+  const { event, group, going, waitlist, canceled, yourRsvp, series } = detail;
   const signupOpen = new Date() >= new Date(event.signupOpensAt);
   const hasActiveRsvp = yourRsvp.status === "going" || yourRsvp.status === "waitlist";
   const shownLocation = event.exactLocation ?? event.generalLocation;
@@ -370,6 +371,8 @@ export function EventDetailClient({
           )}
         </div>
       )}
+
+      {viewerRole === "admin" && series && <SeriesActions seriesId={series.id} weekdays={series.weekdays} />}
 
       {viewerRole === "admin" && editing && (
         <EventForm

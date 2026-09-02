@@ -71,6 +71,55 @@ describe("getEventDetail", () => {
     expect(adminView?.going[0]).not.toHaveProperty("phone");
   });
 
+  it("series is null for a one-off event, for both a member and an admin viewer", async () => {
+    const memberDetail = await getEventDetail(eventId, { id: memberId });
+    expect(memberDetail?.series).toBeNull();
+    const adminDetail = await getEventDetail(eventId, { id: adminId });
+    expect(adminDetail?.series).toBeNull();
+  });
+
+  it("series is populated for an admin viewer on a series instance, but null for a member viewer", async () => {
+    const series = await prisma.eventSeries.create({
+      data: {
+        groupId,
+        title: "Detail Test Series",
+        weekdays: [2, 4],
+        startTime: "19:00",
+        endTime: "20:00",
+        timezone: "America/New_York",
+        recurUntil: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        signupOpensRule: "immediately",
+        capacity: 10,
+        locationRevealPolicy: "always",
+        createdBy: adminId,
+      },
+    });
+    const seriesEvent = await prisma.event.create({
+      data: {
+        groupId,
+        seriesId: series.id,
+        title: "Series Instance",
+        startsAt: new Date(Date.now() + 60 * 60 * 1000),
+        endsAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
+        timezone: "America/New_York",
+        signupOpensAt: new Date(Date.now() - 1000),
+        locationRevealPolicy: "always",
+        createdBy: adminId,
+      },
+    });
+
+    try {
+      const memberDetail = await getEventDetail(seriesEvent.id, { id: memberId });
+      expect(memberDetail?.series).toBeNull();
+
+      const adminDetail = await getEventDetail(seriesEvent.id, { id: adminId });
+      expect(adminDetail?.series).toEqual({ id: series.id, weekdays: [2, 4] });
+    } finally {
+      await prisma.event.deleteMany({ where: { id: seriesEvent.id } });
+      await prisma.eventSeries.deleteMany({ where: { id: series.id } });
+    }
+  });
+
   it("returns null for a nonexistent event", async () => {
     const detail = await getEventDetail("nonexistent-id", { id: memberId });
     expect(detail).toBeNull();

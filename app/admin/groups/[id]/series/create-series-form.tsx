@@ -30,7 +30,7 @@ function todayDateString(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-export function CreateSeriesForm({ groupId }: { groupId: string }) {
+export function CreateSeriesForm({ groupId, onSuccess }: { groupId: string; onSuccess?: () => void }) {
   const router = useRouter();
   const [weekdays, setWeekdays] = useState<number[]>([]);
   const [signupOpensRule, setSignupOpensRule] = useState<"immediately" | "days_before">("immediately");
@@ -91,7 +91,10 @@ export function CreateSeriesForm({ groupId }: { groupId: string }) {
         setError(responseBody.error ?? "Failed to create series.");
         return;
       }
-      router.push(`/admin/groups/${groupId}/series/${responseBody.series.id}`);
+      // No separate series page — the calendar itself shows the newly
+      // materialized instances immediately.
+      router.refresh();
+      onSuccess?.();
     } finally {
       setLoading(false);
     }

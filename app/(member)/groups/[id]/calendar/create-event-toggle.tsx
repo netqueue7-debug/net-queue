@@ -42,7 +42,11 @@ function CreateEventDialog({ groupId, onClose }: { groupId: string; onClose: () 
           </button>
         </div>
 
-        {mode === "one-off" ? <CreateEventForm groupId={groupId} onSuccess={onClose} /> : <CreateSeriesForm groupId={groupId} />}
+        {mode === "one-off" ? (
+          <CreateEventForm groupId={groupId} onSuccess={onClose} />
+        ) : (
+          <CreateSeriesForm groupId={groupId} onSuccess={onClose} />
+        )}
       </div>
     </div>
   );

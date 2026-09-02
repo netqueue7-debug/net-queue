@@ -51,3 +51,12 @@ export function zonedDateString(instant: Date, timezone: string): string {
 export function localMidnightOf(instant: Date, timezone: string): Date {
   return zonedTimeToUtc(zonedDateString(instant, timezone), "00:00", timezone);
 }
+
+// The weekday `instant` falls on in `timezone`, in the same
+// `Date#getUTCDay()` numbering (0 = Sunday .. 6 = Saturday) that
+// lib/events/recurrence.ts#generateOccurrenceDates uses to build a series'
+// occurrences in the first place — so a materialized instance's weekday can
+// be recovered exactly as it was chosen.
+export function zonedWeekday(instant: Date, timezone: string): number {
+  return new Date(`${zonedDateString(instant, timezone)}T00:00:00Z`).getUTCDay();
+}
