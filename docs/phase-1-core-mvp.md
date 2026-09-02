@@ -6,6 +6,8 @@
 
 Read alongside: `docs/policy.md` (rules 1 and 4 apply here), `docs/architecture.md` (queue engine, critical section), `docs/conventions.md`.
 
+> **Note (post-Phase-0b):** this phase shipped before groups existed. Every event/RSVP endpoint listed below is now additionally group-scoped per `docs/phase-0b-groups.md` — the tasks and checks below are left as-written (historical record of what Phase 1 delivered), not amended in place.
+
 This phase contains the hardest correctness work in the project. Take the concurrency tests seriously.
 
 ## Tasks

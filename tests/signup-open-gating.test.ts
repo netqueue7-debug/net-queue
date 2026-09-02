@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { createSession } from "@/lib/auth/session";
 import { WAIVER_VERSION } from "@/lib/waivers/content";
 import { POST as rsvpRoute } from "@/app/api/events/[id]/rsvp/route";
+import { addActiveMembership, createTestGroup, deleteTestGroup } from "./helpers/test-group";
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -14,10 +15,12 @@ describe("signup-open gating", () => {
   let userId: string;
   let token: string;
   let eventId: string;
+  let groupId: string;
 
   afterAll(async () => {
     await prisma.rsvp.deleteMany({ where: { userId } });
     await prisma.event.deleteMany({ where: { createdBy: userId } });
+    await deleteTestGroup(groupId);
     await prisma.user.deleteMany({ where: { phone } });
   });
 
@@ -27,10 +30,13 @@ describe("signup-open gating", () => {
     });
     userId = admin.id;
     token = (await createSession(admin.id)).token;
+    groupId = (await createTestGroup(userId, "Signup Open Gating Test Group")).id;
+    await addActiveMembership(groupId, userId, "admin");
 
     const signupOpensAt = new Date(Date.now() + 1000);
     const event = await prisma.event.create({
       data: {
+        groupId,
         title: "Gating Test Night",
         startsAt: new Date(Date.now() + 60 * 60 * 1000),
         endsAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
@@ -67,6 +73,7 @@ describe("signup-open gating", () => {
     const futureOpensAt = new Date(Date.now() + 60 * 60 * 1000);
     const event = await prisma.event.create({
       data: {
+        groupId,
         title: "Gating Test Night 2",
         startsAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
         endsAt: new Date(Date.now() + 3 * 60 * 60 * 1000),

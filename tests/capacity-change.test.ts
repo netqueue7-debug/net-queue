@@ -4,12 +4,14 @@ import { createRsvp } from "@/lib/rsvp/rsvp";
 import { updateEvent } from "@/lib/events/events";
 import { computeDerivedStatuses } from "@/lib/rsvp/seat-math";
 import { WAIVER_VERSION } from "@/lib/waivers/content";
+import { addActiveMembership, createTestGroup, deleteTestGroup } from "./helpers/test-group";
 
 describe("capacity change semantics", () => {
   const phones = Array.from({ length: 5 }, (_, i) => `+1555555025${i}`);
   let adminId: string;
   let userIds: string[];
   let eventId: string;
+  let groupId: string;
 
   beforeAll(async () => {
     const users = await Promise.all(
@@ -26,9 +28,12 @@ describe("capacity change semantics", () => {
     );
     adminId = users[0].id;
     userIds = users.map((u) => u.id);
+    groupId = (await createTestGroup(adminId, "Capacity Change Test Group")).id;
+    await Promise.all(userIds.map((userId, i) => addActiveMembership(groupId, userId, i === 0 ? "admin" : "member")));
 
     const event = await prisma.event.create({
       data: {
+        groupId,
         title: "Capacity Change Test",
         startsAt: new Date(Date.now() + 60 * 60 * 1000),
         endsAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
@@ -47,8 +52,10 @@ describe("capacity change semantics", () => {
   });
 
   afterAll(async () => {
+    await prisma.notification.deleteMany({ where: { eventId } });
     await prisma.rsvp.deleteMany({ where: { eventId } });
     await prisma.event.deleteMany({ where: { id: eventId } });
+    await deleteTestGroup(groupId);
     await prisma.user.deleteMany({ where: { phone: { in: phones } } });
   });
 
@@ -84,5 +91,26 @@ describe("capacity change semantics", () => {
     await updateEvent(eventId, { capacity: null });
     const going = await goingUserIds();
     expect(going).toEqual(new Set(userIds));
+  });
+
+  it("resubmitting the same capacity (the edit form always includes it) logs and notifies nothing", async () => {
+    const before = await prisma.event.findUniqueOrThrow({ where: { id: eventId } });
+    const logsBefore = await prisma.eventLog.count({ where: { eventId, action: "event.capacity_changed" } });
+    const notificationsBefore = await prisma.notification.count({ where: { eventId, type: "capacity_changed" } });
+
+    // Same edit-form behavior that triggered the bug: every save includes
+    // `capacity` in the body even when the admin only changed another
+    // field, so "capacity" in input is true on every edit.
+    await updateEvent(eventId, { capacity: before.capacity, title: "Capacity Change Test (renamed)" }, adminId);
+
+    const after = await prisma.event.findUniqueOrThrow({ where: { id: eventId } });
+    expect(after.capacity).toBe(before.capacity);
+    expect(after.title).toBe("Capacity Change Test (renamed)");
+
+    const logsAfter = await prisma.eventLog.count({ where: { eventId, action: "event.capacity_changed" } });
+    expect(logsAfter).toBe(logsBefore);
+
+    const notificationsAfter = await prisma.notification.count({ where: { eventId, type: "capacity_changed" } });
+    expect(notificationsAfter).toBe(notificationsBefore);
   });
 });

@@ -1,4 +1,5 @@
 import type { Event } from "@/lib/generated/prisma/client";
+import { localMidnightOf } from "@/lib/timezone";
 
 export interface SerializedEvent {
   id: string;
@@ -9,52 +10,24 @@ export interface SerializedEvent {
   timezone: string;
   capacity: number | null;
   maxGuestsPerRsvp: number | null;
+  waiverRequired: boolean;
   signupOpensAt: string;
   status: string;
   locationRevealPolicy: string;
   locationRevealHours: number | null;
   generalLocation: string | null;
   exactLocation: string | null;
+  // Gated identically to exactLocation — a map link is at least as
+  // precise as the address text, so it must never be visible any earlier.
+  googleMapsUrl: string | null;
+  appleMapsUrl: string | null;
   locationRevealsAt: string | null;
 }
 
-// What the target timezone's UTC offset is, in minutes, at the given
-// instant (positive east of Greenwich). Computed by formatting the
-// instant's wall-clock time in that zone, re-reading those components as
-// if they were UTC, and diffing against the real instant — no date library.
-function getTimezoneOffsetMinutes(timeZone: string, date: Date): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    hourCycle: "h23",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).formatToParts(date);
-
-  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value);
-  const asUTC = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"));
-  return (asUTC - date.getTime()) / 60_000;
-}
-
-// The UTC instant corresponding to local midnight, in `timezone`, of the
-// calendar date that `instant` falls on in that same timezone.
-function localMidnightOf(instant: Date, timezone: string): Date {
-  const dateStr = new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(instant); // "YYYY-MM-DD"
-
-  const guessUtc = new Date(`${dateStr}T00:00:00Z`);
-  const offsetMinutes = getTimezoneOffsetMinutes(timezone, guessUtc);
-  return new Date(guessUtc.getTime() - offsetMinutes * 60_000);
-}
-
-function locationRevealAt(event: Event): Date {
+// Exported for lib/notifications/jobs.ts's location-reveal cron job — same
+// "when does this event's location become visible" calculation, reused
+// rather than duplicated.
+export function locationRevealAt(event: Event): Date {
   if (event.locationRevealPolicy === "hours_before") {
     const hours = event.locationRevealHours ?? 0;
     return new Date(event.startsAt.getTime() - hours * 60 * 60 * 1000);
@@ -84,6 +57,7 @@ export function serializeEvent(
     timezone: event.timezone,
     capacity: event.capacity,
     maxGuestsPerRsvp: event.maxGuestsPerRsvp,
+    waiverRequired: event.waiverRequired,
     signupOpensAt: event.signupOpensAt.toISOString(),
     status: event.status,
     locationRevealPolicy: event.locationRevealPolicy,
@@ -95,6 +69,8 @@ export function serializeEvent(
       ...base,
       generalLocation: event.generalLocation,
       exactLocation: event.exactLocation,
+      googleMapsUrl: event.googleMapsUrl,
+      appleMapsUrl: event.appleMapsUrl,
       locationRevealsAt: null,
     };
   }
@@ -104,6 +80,8 @@ export function serializeEvent(
       ...base,
       generalLocation: event.generalLocation,
       exactLocation: event.exactLocation,
+      googleMapsUrl: event.googleMapsUrl,
+      appleMapsUrl: event.appleMapsUrl,
       locationRevealsAt: null,
     };
   }
@@ -116,6 +94,8 @@ export function serializeEvent(
       ...base,
       generalLocation: revealed ? event.generalLocation : null,
       exactLocation: revealed ? event.exactLocation : null,
+      googleMapsUrl: revealed ? event.googleMapsUrl : null,
+      appleMapsUrl: revealed ? event.appleMapsUrl : null,
       locationRevealsAt: null,
     };
   }
@@ -124,6 +104,8 @@ export function serializeEvent(
     ...base,
     generalLocation: event.generalLocation,
     exactLocation: revealed ? event.exactLocation : null,
+    googleMapsUrl: revealed ? event.googleMapsUrl : null,
+    appleMapsUrl: revealed ? event.appleMapsUrl : null,
     locationRevealsAt: revealed ? null : revealAt.toISOString(),
   };
 }

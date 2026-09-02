@@ -1,6 +1,6 @@
 # Policy — settled business rules
 
-These five rules are decided. They are not open for reinterpretation during implementation. When a requirement seems ambiguous, the answer is almost always here.
+These rules are decided. They are not open for reinterpretation during implementation. When a requirement seems ambiguous, the answer is almost always here.
 
 ## 1. Parties are atomic, and the queue never skips
 
@@ -38,10 +38,20 @@ Users may cancel at any time up to and including event start. The boundary recom
 
 Admin-added guests are created directly in `approved` state — they skip the approval step. They still attach to the host's existing queue position. **No queue jumping, no displacing anyone** beyond the normal boundary recomputation that any approval causes.
 
+## 6. Groups are the visibility and identity boundary — not just a filter
+
+A user with no active membership in a group cannot see that group exists, list its events, or appear in its member/admin views — this is an authorization rule, not a UI filter, and must be enforced in the service layer like every other authz check.
+
+- **`open` groups**: a valid join code activates membership immediately, no admin action required.
+- **`approval` groups**: a valid join code creates a `pending` membership; the user sees nothing about that group until a group admin approves it. Rejection is a hard stop (the user may request again, e.g. by submitting the code again — this does not create duplicate rows; treat it as retrying the same pending/rejected membership).
+- **Two tiers of admin.** A **group admin** (`group_memberships.role = admin`) is scoped to only their own group(s) — being an admin of one confers no authority in another. A **platform admin** (`users.role = admin`) has full administrative control over *every* group, without needing a membership row in each one — this is the deliberate "break glass" tier for the people operating the deployment, not a per-group concept. Day-to-day group management should be done as a group admin; platform admin is for setup, support, and cross-group intervention.
+- **Group creation is platform-admin-only, not self-serve.** Any authenticated member being able to spin up a group would defeat the point of scoping (instant admin of a fresh, empty tenant). For now, only a platform admin can create a group, and assigns its first group admin at creation time. Revisit only as an explicit product decision — never quietly relaxed to unblock a feature.
+- **Waiver requirement is per event/series, waiver content is per group, and this is on top of the platform waiver, not instead of it.** A group can require its own (group-scoped) waiver on some events and not others. This is a second, independent acceptance from Phase 0's platform onboarding waiver — both can be required at once. The group-waiver gate is checked alongside signup-open and capacity, inside the same RSVP transaction — never only in the UI.
+
 ---
 
 ## Derived rules that follow from the above
 
 - **Uncapped events** (`capacity = null`): everyone is "going," the waitlist never populates, and the UI hides the waitlist section entirely.
-- **Waivers never block anything.** The user waiver is required once before a user's first RSVP. Guest waivers are generated and sent, but an unsigned guest waiver does **not** block approval or attendance — admins collect signatures onsite. Show an "outstanding waiver" badge instead.
+- **Guest waivers never block anything.** Guest waivers are generated and sent, but an unsigned guest waiver does **not** block approval or attendance — admins collect signatures onsite. Show an "outstanding waiver" badge instead. (This is distinct from both the platform waiver and a group's own waiver, rule 6 — those two *do* gate a member's own RSVP when applicable, same as Phase 0/1's original waiver check always did.)
 - **Canceled RSVPs are retained, not deleted.** They leave the queue but remain visible in the event's "canceled" list.

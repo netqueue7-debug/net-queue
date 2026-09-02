@@ -13,17 +13,23 @@
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
     "admin:promote": "tsx scripts/promote-admin.ts",
+    "backfill:default-group": "tsx scripts/backfill-default-group.ts",
     "load-test:rsvp": "tsx scripts/load-test-rsvp.ts",
+    "job:retry-notifications": "tsx scripts/jobs/retry-notifications.ts",
+    "job:location-reveal": "tsx scripts/jobs/location-reveal.ts",
+    "job:day-before-reminder": "tsx scripts/jobs/day-before-reminder.ts",
     "postinstall": "prisma generate",
     "vercel-build": "prisma migrate deploy && next build"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
+    "@vercel/blob": "^2.8.0",
     "next": "16.3.3",
     "pg": "^8.23.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "react-easy-crop": "^6.2.3",
     "twilio": "^6.1.0",
     "zod": "^4.4.3"
   },

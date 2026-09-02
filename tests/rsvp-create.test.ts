@@ -8,10 +8,12 @@ import {
   UserBannedError,
   WaiverNotAcceptedError,
 } from "@/lib/rsvp/errors";
+import { addActiveMembership, createTestGroup, deleteTestGroup } from "./helpers/test-group";
 
 describe("createRsvp", () => {
   const adminPhone = "+15555550230";
   let adminId: string;
+  let groupId: string;
   let openEventId: string;
 
   beforeAll(async () => {
@@ -19,17 +21,21 @@ describe("createRsvp", () => {
       data: { phone: adminPhone, role: "admin", waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
     });
     adminId = admin.id;
+    groupId = (await createTestGroup(adminId, "RSVP Create Test Group")).id;
+    await addActiveMembership(groupId, adminId, "admin");
   });
 
   afterAll(async () => {
     await prisma.rsvp.deleteMany({ where: { userId: adminId } });
     await prisma.event.deleteMany({ where: { createdBy: adminId } });
+    await deleteTestGroup(groupId);
     await prisma.user.deleteMany({ where: { phone: adminPhone } });
   });
 
   async function makeOpenEvent(overrides: Record<string, unknown> = {}) {
     return prisma.event.create({
       data: {
+        groupId,
         title: "RSVP Create Test Night",
         startsAt: new Date(Date.now() + 60 * 60 * 1000),
         endsAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
@@ -57,15 +63,19 @@ describe("createRsvp", () => {
         bannedAt: new Date(),
       },
     });
+    await addActiveMembership(groupId, banned.id);
     const event = await makeOpenEvent();
     await expect(createRsvp(event.id, banned.id)).rejects.toBeInstanceOf(UserBannedError);
+    await prisma.groupMembership.deleteMany({ where: { userId: banned.id } });
     await prisma.user.delete({ where: { id: banned.id } });
   });
 
   it("rejects a user who hasn't accepted the current waiver", async () => {
     const noWaiver = await prisma.user.create({ data: { phone: "+15555550232", role: "member" } });
+    await addActiveMembership(groupId, noWaiver.id);
     const event = await makeOpenEvent();
     await expect(createRsvp(event.id, noWaiver.id)).rejects.toBeInstanceOf(WaiverNotAcceptedError);
+    await prisma.groupMembership.deleteMany({ where: { userId: noWaiver.id } });
     await prisma.user.delete({ where: { id: noWaiver.id } });
   });
 
@@ -85,6 +95,7 @@ describe("createRsvp", () => {
     const other = await prisma.user.create({
       data: { phone: "+15555550233", role: "member", waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
     });
+    await addActiveMembership(groupId, other.id);
     await createRsvp(openEventId, other.id);
 
     await prisma.rsvp.updateMany({
@@ -100,6 +111,7 @@ describe("createRsvp", () => {
     expect(allRows).toHaveLength(2);
 
     await prisma.rsvp.deleteMany({ where: { userId: other.id } });
+    await prisma.groupMembership.deleteMany({ where: { userId: other.id } });
     await prisma.user.delete({ where: { id: other.id } });
   });
 });

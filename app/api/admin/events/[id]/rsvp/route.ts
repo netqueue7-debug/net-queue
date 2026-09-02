@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAdmin, ForbiddenError, UnauthorizedError } from "@/lib/auth/session";
+import { requireMember, ForbiddenError, UnauthorizedError } from "@/lib/auth/session";
+import { assertGroupAdmin } from "@/lib/groups/authz";
+import { prisma } from "@/lib/db";
 import { cancelRsvp } from "@/lib/rsvp/rsvp";
 import { RsvpNotFoundError } from "@/lib/rsvp/errors";
 
@@ -14,10 +16,9 @@ const bodySchema = z.object({ userId: z.string() });
 export async function DELETE(request: NextRequest, { params }: RouteContext) {
   let admin;
   try {
-    admin = await requireAdmin(request);
+    admin = await requireMember(request);
   } catch (e) {
     if (e instanceof UnauthorizedError) return NextResponse.json({ error: e.message }, { status: 401 });
-    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
     throw e;
   }
 
@@ -27,6 +28,17 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
   }
 
   const { id } = await params;
+  const event = await prisma.event.findUnique({ where: { id }, select: { groupId: true } });
+  if (!event) return NextResponse.json({ error: "Event not found." }, { status: 404 });
+
+  try {
+    // Group-admin of this event's group, not platform-admin (policy.md#6).
+    await assertGroupAdmin(event.groupId, admin.id);
+  } catch (e) {
+    if (e instanceof ForbiddenError) return NextResponse.json({ error: e.message }, { status: 403 });
+    throw e;
+  }
+
   try {
     const rsvp = await cancelRsvp(id, parsed.data.userId, admin.id);
     return NextResponse.json({ rsvp });

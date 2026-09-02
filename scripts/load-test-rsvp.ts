@@ -28,6 +28,13 @@ async function main() {
     create: { phone: adminPhone, role: "admin", displayName: "Load Test Admin" },
   });
 
+  // Created fresh (not reused across runs) so cleanup can delete it along
+  // with the admin user it references — a reused group would outlive this
+  // run's admin and hit the FK RESTRICT on `groups.created_by`.
+  const group = await prisma.group.create({
+    data: { name: "Load Test Group", joinPolicy: "open", joinCode: `load-test-${Date.now()}`, createdBy: admin.id },
+  });
+
   const userPhones = Array.from({ length: CONCURRENT_USERS }, (_, i) => `+1555556${String(i).padStart(4, "0")}`);
   const users = await Promise.all(
     userPhones.map((phone) =>
@@ -39,12 +46,18 @@ async function main() {
     ),
   );
 
+  // createRsvp now requires an active membership in the event's group.
+  await Promise.all(
+    users.map((u) => prisma.groupMembership.create({ data: { groupId: group.id, userId: u.id, status: "active" } })),
+  );
+
   // Signup opens 300ms from now — the point of "at the instant signup
   // opens" is to prove the lock serializes real concurrent contention, not
   // to test the gating check itself (that's a separate, already-tested task).
   const signupOpensAt = new Date(Date.now() + 300);
   const event = await prisma.event.create({
     data: {
+      groupId: group.id,
       title: "Load Test Night",
       startsAt: new Date(Date.now() + 60 * 60 * 1000),
       endsAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
@@ -117,8 +130,11 @@ async function main() {
 
   // Cleanup
   await prisma.eventLog.deleteMany({ where: { eventId: event.id } });
+  await prisma.notification.deleteMany({ where: { eventId: event.id } });
   await prisma.rsvp.deleteMany({ where: { eventId: event.id } });
   await prisma.event.deleteMany({ where: { id: event.id } });
+  await prisma.groupMembership.deleteMany({ where: { groupId: group.id } });
+  await prisma.group.delete({ where: { id: group.id } });
   await prisma.user.deleteMany({ where: { phone: { in: [adminPhone, ...userPhones] } } });
   await prisma.$disconnect();
 

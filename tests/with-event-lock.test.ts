@@ -1,6 +1,7 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import { withEventLock } from "@/lib/rsvp/with-event-lock";
+import { createTestGroup, deleteTestGroup } from "./helpers/test-group";
 
 describe("withEventLock", () => {
   const phone = "+15555550201";
@@ -8,15 +9,18 @@ describe("withEventLock", () => {
   let userAId: string;
   let userBId: string;
   let eventId: string;
+  let groupId: string;
 
   beforeAll(async () => {
     const admin = await prisma.user.create({ data: { phone, displayName: "Admin", role: "admin" } });
     const userB = await prisma.user.create({ data: { phone: phoneB, displayName: "UserB" } });
     userAId = admin.id; // admin also RSVPs as a "member" for test purposes
     userBId = userB.id;
+    groupId = (await createTestGroup(userAId, "With Event Lock Test Group")).id;
 
     const event = await prisma.event.create({
       data: {
+        groupId,
         title: "Lock Test Night",
         startsAt: new Date(Date.now() + 60 * 60 * 1000),
         endsAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
@@ -30,8 +34,10 @@ describe("withEventLock", () => {
   });
 
   afterAll(async () => {
+    await prisma.notification.deleteMany({ where: { eventId } });
     await prisma.rsvp.deleteMany({ where: { eventId } });
     await prisma.event.deleteMany({ where: { id: eventId } });
+    await deleteTestGroup(groupId);
     await prisma.user.deleteMany({ where: { phone: { in: [phone, phoneB] } } });
   });
 
@@ -53,8 +59,6 @@ describe("withEventLock", () => {
   });
 
   it("only notifies RSVPs that existed both before and after and changed status", async () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-
     // Set capacity to 1 after the fact: userA (position 1) going, userB (position 2) waitlisted.
     await prisma.event.update({ where: { id: eventId }, data: { capacity: 1 } });
 
@@ -64,12 +68,12 @@ describe("withEventLock", () => {
       await tx.rsvp.update({ where: { id: rsvpA.id }, data: { status: "canceled", canceledAt: new Date() } });
     });
 
-    const notifyLogs = logSpy.mock.calls.map((args) => String(args[0]));
-    // userB should be promoted (waitlist -> going) and notified.
-    expect(notifyLogs.some((l) => l.includes(userBId) && l.includes("waitlist -> going"))).toBe(true);
-    // userA's own RSVP (now canceled, absent from the "after" snapshot) must not appear.
-    expect(notifyLogs.some((l) => l.includes(rsvpA.id))).toBe(false);
+    const notifications = await prisma.notification.findMany({ where: { eventId } });
 
-    logSpy.mockRestore();
+    // userB should be promoted (waitlist -> going) and notified.
+    expect(notifications.some((n) => n.userId === userBId && n.type === "rsvp_promoted")).toBe(true);
+    // userA's own RSVP (now canceled, absent from the "after" snapshot) must not appear —
+    // it has no real prior/subsequent status to have "crossed" between.
+    expect(notifications.some((n) => n.userId === userAId)).toBe(false);
   });
 });

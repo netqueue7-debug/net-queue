@@ -13,5 +13,5 @@ export default async function EventDetailPage({ params }: { params: Promise<{ id
   const detail = await getEventDetail(id, user);
   if (!detail) notFound();
 
-  return <EventDetailClient detail={detail} viewerRole={user.role} eventId={id} />;
+  return <EventDetailClient detail={detail} viewerRole={detail.viewerRole} viewerUserId={user.id} eventId={id} />;
 }

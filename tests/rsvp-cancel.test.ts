@@ -4,12 +4,14 @@ import { createRsvp, cancelRsvp } from "@/lib/rsvp/rsvp";
 import { computeDerivedStatuses } from "@/lib/rsvp/seat-math";
 import { WAIVER_VERSION } from "@/lib/waivers/content";
 import { RsvpNotFoundError } from "@/lib/rsvp/errors";
+import { addActiveMembership, createTestGroup, deleteTestGroup } from "./helpers/test-group";
 
 describe("cancelRsvp", () => {
   const phones = ["+15555550240", "+15555550241", "+15555550242", "+15555550243", "+15555550244"];
   let adminId: string;
   let userIds: string[];
   let eventId: string;
+  let groupId: string;
 
   beforeAll(async () => {
     const users = await Promise.all(
@@ -26,9 +28,12 @@ describe("cancelRsvp", () => {
     );
     adminId = users[0].id;
     userIds = users.map((u) => u.id);
+    groupId = (await createTestGroup(adminId, "Cancel Promotion Test Group")).id;
+    await Promise.all(userIds.map((userId, i) => addActiveMembership(groupId, userId, i === 0 ? "admin" : "member")));
 
     const event = await prisma.event.create({
       data: {
+        groupId,
         title: "Cancel Promotion Test",
         startsAt: new Date(Date.now() + 60 * 60 * 1000),
         endsAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
@@ -48,8 +53,10 @@ describe("cancelRsvp", () => {
   });
 
   afterAll(async () => {
+    await prisma.notification.deleteMany({ where: { eventId } });
     await prisma.rsvp.deleteMany({ where: { eventId } });
     await prisma.event.deleteMany({ where: { id: eventId } });
+    await deleteTestGroup(groupId);
     await prisma.user.deleteMany({ where: { phone: { in: phones } } });
   });
 
