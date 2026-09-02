@@ -34,12 +34,14 @@ export function listEvents(groupId: string): Promise<Event[]> {
 }
 
 // Member-facing listing: not-canceled events across every group the viewer
-// has an active membership in. An empty `groupIds` (member of nothing)
-// correctly yields no events, not "all events" — never pass an unfiltered
-// query here.
+// has an active membership in, excluding ones that have already ended
+// (`endsAt`, not `startsAt` — an event currently in progress still counts
+// as "upcoming"/current, not passed). An empty `groupIds` (member of
+// nothing) correctly yields no events, not "all events" — never pass an
+// unfiltered query here.
 export function listUpcomingEvents(groupIds: string[]): Promise<Event[]> {
   return prisma.event.findMany({
-    where: { status: "scheduled", groupId: { in: groupIds } },
+    where: { status: "scheduled", groupId: { in: groupIds }, endsAt: { gt: new Date() } },
     orderBy: { startsAt: "asc" },
   });
 }

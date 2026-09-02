@@ -14,6 +14,10 @@ function describe(n: InAppNotification): string {
       return `${payload.guestName ?? "Your guest"} was approved.`;
     case "guest_rejected":
       return `${payload.guestName ?? "Your guest"} was not approved.`;
+    case "group_membership_approved":
+      return `You were approved to join ${payload.groupName ?? "a group"}.`;
+    case "group_membership_rejected":
+      return `Your request to join ${payload.groupName ?? "a group"} was not approved.`;
     case "capacity_changed":
       return `Capacity for ${payload.eventTitle} changed from ${payload.from ?? "unlimited"} to ${payload.to ?? "unlimited"}.`;
     case "waiver_reminder":
@@ -35,6 +39,10 @@ function describe(n: InAppNotification): string {
 export function NotificationItem({ notification }: { notification: InAppNotification }) {
   const router = useRouter();
   const unread = !notification.readAt;
+  // Only the approved case is actually reachable — a rejected membership
+  // 404s on the group's pages (resolveGroupMembership requires `active`).
+  const payload = notification.payload as Record<string, unknown>;
+  const groupHref = notification.type === "group_membership_approved" ? `/groups/${payload.groupId}/calendar` : null;
 
   async function handleMarkRead() {
     await fetch(`/api/notifications/${notification.id}/read`, { method: "POST" });
@@ -57,6 +65,10 @@ export function NotificationItem({ notification }: { notification: InAppNotifica
       <Card className="p-3">
         {notification.eventId ? (
           <Link href={`/events/${notification.eventId}`} className="block">
+            {body}
+          </Link>
+        ) : groupHref ? (
+          <Link href={groupHref} className="block">
             {body}
           </Link>
         ) : (

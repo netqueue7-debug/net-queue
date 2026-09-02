@@ -3,6 +3,7 @@ import { getSession } from "@/lib/auth/session";
 import { needsOnboarding } from "@/lib/auth/onboarding";
 import { countUnreadNotifications } from "@/lib/notifications/notifications";
 import { getDefaultAdminGroupId } from "@/lib/groups/authz";
+import { getPendingMembershipCountForAdmin } from "@/lib/groups/groups";
 import { CalendarIcon, UsersIcon, BellIcon, ShieldIcon } from "./icons";
 import { AvatarMenu } from "./avatar-menu";
 
@@ -13,8 +14,11 @@ export async function Nav() {
   const user = await getSession();
   if (!user || needsOnboarding(user)) return null;
 
+  const isPlatformAdmin = user.role === "admin";
   const [unreadCount, adminGroupId] = await Promise.all([countUnreadNotifications(user.id), getDefaultAdminGroupId(user.id)]);
-  const showAdmin = user.role === "admin" || adminGroupId !== null;
+  const showAdmin = isPlatformAdmin || adminGroupId !== null;
+  // Only worth the extra query when the Admin link is actually showing.
+  const pendingMembershipCount = showAdmin ? await getPendingMembershipCountForAdmin(user.id, isPlatformAdmin) : 0;
   const initial = (user.displayName ?? "?").trim().charAt(0).toUpperCase();
 
   return (
@@ -43,9 +47,14 @@ export async function Nav() {
             )}
           </Link>
           {showAdmin && (
-            <Link href="/admin" className={linkClass}>
+            <Link href="/admin" className={`${linkClass} relative`}>
               <ShieldIcon width={16} height={16} />
               <span className="hidden sm:inline">Admin</span>
+              {pendingMembershipCount > 0 && (
+                <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-semibold text-white sm:static sm:ml-0.5">
+                  {pendingMembershipCount > 9 ? "9+" : pendingMembershipCount}
+                </span>
+              )}
             </Link>
           )}
           <AvatarMenu avatarUrl={user.avatarUrl} initial={initial} />

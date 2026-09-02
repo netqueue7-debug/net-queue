@@ -81,6 +81,42 @@ describe("admin single-event CRUD", () => {
     expect(body.events.some((e: { id: string }) => e.id === eventId)).toBe(true);
   });
 
+  it("GET /api/events excludes events that have already ended, even a currently-in-progress one", async () => {
+    const now = Date.now();
+    const adminUserId = (await prisma.user.findUniqueOrThrow({ where: { phone: adminPhone } })).id;
+    const past = await prisma.event.create({
+      data: {
+        ...validEventBody,
+        title: "Already Over",
+        startsAt: new Date(now - 4 * 60 * 60 * 1000),
+        endsAt: new Date(now - 2 * 60 * 60 * 1000),
+        locationRevealPolicy: "always" as const,
+        createdBy: adminUserId,
+      },
+    });
+    const inProgress = await prisma.event.create({
+      data: {
+        ...validEventBody,
+        title: "Happening Now",
+        startsAt: new Date(now - 60 * 60 * 1000),
+        endsAt: new Date(now + 60 * 60 * 1000),
+        locationRevealPolicy: "always" as const,
+        createdBy: adminUserId,
+      },
+    });
+
+    try {
+      const res = await listRoute(req("http://localhost/api/events", { token: memberToken }));
+      const body = await res.json();
+      const ids = body.events.map((e: { id: string }) => e.id);
+      expect(ids).not.toContain(past.id);
+      // Started but not yet ended still counts as current, not "passed".
+      expect(ids).toContain(inProgress.id);
+    } finally {
+      await prisma.event.deleteMany({ where: { id: { in: [past.id, inProgress.id] } } });
+    }
+  });
+
   it("a member can list and view events (read access is member-facing; write is admin-only)", async () => {
     const listRes = await listRoute(req("http://localhost/api/events", { token: memberToken }));
     expect(listRes.status).toBe(200);

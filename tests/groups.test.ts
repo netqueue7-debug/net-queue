@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { createSession } from "@/lib/auth/session";
 import { createRsvp } from "@/lib/rsvp/rsvp";
+import { getPendingMembershipCountForAdmin, getPendingMembershipCounts } from "@/lib/groups/groups";
 import { GroupWaiverNotAcceptedError } from "@/lib/rsvp/errors";
 import { POST as createGroupRoute, GET as listGroupsRoute } from "@/app/api/groups/route";
 import { POST as joinGroupRoute } from "@/app/api/groups/join/route";
@@ -32,7 +33,9 @@ describe("groups", () => {
   const groupAdminPhone = "+15555550501";
   const memberPhone = "+15555550502";
   const outsiderPhone = "+15555550503";
+  const secondOutsiderPhone = "+15555550504";
 
+  let platformAdminId: string;
   let platformAdminToken: string;
   let groupAdminId: string;
   let groupAdminToken: string;
@@ -40,8 +43,10 @@ describe("groups", () => {
   let memberToken: string;
   let outsiderId: string;
   let outsiderToken: string;
+  let secondOutsiderId: string;
+  let secondOutsiderToken: string;
 
-  const allPhones = [platformAdminPhone, groupAdminPhone, memberPhone, outsiderPhone];
+  const allPhones = [platformAdminPhone, groupAdminPhone, memberPhone, outsiderPhone, secondOutsiderPhone];
   const groupIds: string[] = [];
 
   afterAll(async () => {
@@ -61,15 +66,19 @@ describe("groups", () => {
     const groupAdmin = await prisma.user.create({ data: { phone: groupAdminPhone } });
     const member = await prisma.user.create({ data: { phone: memberPhone } });
     const outsider = await prisma.user.create({ data: { phone: outsiderPhone } });
+    const secondOutsider = await prisma.user.create({ data: { phone: secondOutsiderPhone } });
 
+    platformAdminId = platformAdmin.id;
     groupAdminId = groupAdmin.id;
     memberId = member.id;
     outsiderId = outsider.id;
+    secondOutsiderId = secondOutsider.id;
 
     platformAdminToken = (await createSession(platformAdmin.id)).token;
     groupAdminToken = (await createSession(groupAdmin.id)).token;
     memberToken = (await createSession(member.id)).token;
     outsiderToken = (await createSession(outsider.id)).token;
+    secondOutsiderToken = (await createSession(secondOutsider.id)).token;
   });
 
   it("group creation is platform-admin-only", async () => {
@@ -157,6 +166,11 @@ describe("groups", () => {
     expect(rejectRes.status).toBe(200);
     expect((await rejectRes.json()).status).toBe("rejected");
 
+    const rejectedNotification = await prisma.notification.findFirst({
+      where: { userId: outsiderId, type: "group_membership_rejected" },
+    });
+    expect(rejectedNotification).toMatchObject({ channel: "in_app", status: "sent" });
+
     // Resubmitting the same code moves rejected -> pending again, not stuck forever.
     const resubmit = await joinGroupRoute(
       req("http://localhost/api/groups/join", { method: "POST", body: { code: group.joinCode }, token: outsiderToken }),
@@ -172,6 +186,47 @@ describe("groups", () => {
 
     const rows = await prisma.groupMembership.findMany({ where: { groupId: group.id, userId: outsiderId } });
     expect(rows).toHaveLength(1); // still one row throughout pending -> rejected -> pending -> active
+
+    const approvedNotification = await prisma.notification.findFirst({
+      where: { userId: outsiderId, type: "group_membership_approved" },
+    });
+    expect(approvedNotification).toMatchObject({ channel: "in_app", status: "sent" });
+  });
+
+  it("admin discovery: pending-membership counts are scoped to a group admin's own groups, but global for a platform admin", async () => {
+    const group = await prisma.group.findFirst({ where: { name: "Approval Test Group" } });
+
+    // A fresh pending join, since the earlier outsider from the previous
+    // test is already active — this is the one thing both counts below
+    // should now reflect.
+    const joinRes = await joinGroupRoute(
+      req("http://localhost/api/groups/join", { method: "POST", body: { code: group!.joinCode }, token: secondOutsiderToken }),
+    );
+    expect((await joinRes.json()).status).toBe("pending");
+
+    const scopedCount = await getPendingMembershipCountForAdmin(groupAdminId, false);
+    const directCount = await getPendingMembershipCounts([group!.id]);
+    expect(directCount.get(group!.id)).toBe(1);
+    // groupAdmin administers both "Open Test Group" (open policy, nothing
+    // pending) and "Approval Test Group" (this one pending row) — so the
+    // scoped total is exactly 1, not just "at least 1".
+    expect(scopedCount).toBe(1);
+
+    // The platform-wide view is a superset of any single admin's — other
+    // parallel test files may add their own pending rows, so this can't
+    // assert an exact global count without flaking.
+    const platformCount = await getPendingMembershipCountForAdmin(platformAdminId, true);
+    expect(platformCount).toBeGreaterThanOrEqual(scopedCount);
+
+    // A plain member of a wholly unrelated group (outsider has none) sees no queue at all.
+    const noGroupsCount = await getPendingMembershipCountForAdmin(secondOutsiderId, false);
+    expect(noGroupsCount).toBe(0);
+
+    // Clean up so this doesn't leak a pending row into later tests in this file.
+    await rejectRoute(
+      req(`http://localhost/api/groups/${group!.id}/memberships/${secondOutsiderId}/reject`, { method: "POST", token: groupAdminToken }),
+      { params: Promise.resolve({ id: group!.id, userId: secondOutsiderId }) },
+    );
   });
 
   it("GET /api/groups lists only the caller's own memberships, with status", async () => {

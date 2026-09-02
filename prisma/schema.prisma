@@ -94,6 +94,8 @@ enum NotificationType {
   event_canceled
   guest_approved
   guest_rejected
+  group_membership_approved
+  group_membership_rejected
   capacity_changed
   waiver_reminder
   location_reveal

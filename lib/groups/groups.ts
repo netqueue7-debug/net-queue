@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { normalizeUsPhone } from "@/lib/auth/otp";
+import { enqueueNotification } from "@/lib/notifications/notifications";
+import { getAdminGroupIds } from "@/lib/groups/authz";
 import {
   GroupNotFoundError,
   GroupWaiverNotConfiguredError,
@@ -107,6 +109,28 @@ export async function getActiveMemberCounts(groupIds: string[]): Promise<Map<str
     _count: { _all: true },
   });
   return new Map(counts.map((c) => [c.groupId, c._count._all]));
+}
+
+export async function getPendingMembershipCounts(groupIds: string[]): Promise<Map<string, number>> {
+  const counts = await prisma.groupMembership.groupBy({
+    by: ["groupId"],
+    where: { groupId: { in: groupIds }, status: "pending" },
+    _count: { _all: true },
+  });
+  return new Map(counts.map((c) => [c.groupId, c._count._all]));
+}
+
+// Nav-badge total (docs/policy.md#6's per-group admin boundary): a platform
+// admin sees every group's queue, since their control is system-wide with
+// no membership rows of their own to scope by; a real group admin sees only
+// the groups they actually administer (getAdminGroupIds).
+export async function getPendingMembershipCountForAdmin(userId: string, isPlatformAdmin: boolean): Promise<number> {
+  if (isPlatformAdmin) {
+    return prisma.groupMembership.count({ where: { status: "pending" } });
+  }
+  const groupIds = await getAdminGroupIds(userId);
+  if (groupIds.length === 0) return 0;
+  return prisma.groupMembership.count({ where: { groupId: { in: groupIds }, status: "pending" } });
 }
 
 async function assertUnderMemberLimit(group: Group): Promise<void> {
@@ -269,9 +293,18 @@ export async function approveMembership(groupId: string, userId: string): Promis
   await findMembershipOrThrow(groupId, userId);
   const group = await getGroupOrThrow(groupId);
   await assertUnderMemberLimit(group);
-  return prisma.groupMembership.update({
-    where: { groupId_userId: { groupId, userId } },
-    data: { status: "active" },
+  return prisma.$transaction(async (tx) => {
+    const membership = await tx.groupMembership.update({
+      where: { groupId_userId: { groupId, userId } },
+      data: { status: "active" },
+    });
+    await enqueueNotification(tx, {
+      userId,
+      eventId: null,
+      type: "group_membership_approved",
+      payload: { groupId, groupName: group.name },
+    });
+    return membership;
   });
 }
 
@@ -279,9 +312,19 @@ export async function approveMembership(groupId: string, userId: string): Promis
 // not a permanent ban (policy.md#6's join-flow rule).
 export async function rejectMembership(groupId: string, userId: string): Promise<GroupMembership> {
   await findMembershipOrThrow(groupId, userId);
-  return prisma.groupMembership.update({
-    where: { groupId_userId: { groupId, userId } },
-    data: { status: "rejected" },
+  const group = await getGroupOrThrow(groupId);
+  return prisma.$transaction(async (tx) => {
+    const membership = await tx.groupMembership.update({
+      where: { groupId_userId: { groupId, userId } },
+      data: { status: "rejected" },
+    });
+    await enqueueNotification(tx, {
+      userId,
+      eventId: null,
+      type: "group_membership_rejected",
+      payload: { groupId, groupName: group.name },
+    });
+    return membership;
   });
 }
 

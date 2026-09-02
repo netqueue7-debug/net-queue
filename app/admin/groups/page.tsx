@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
-import { listAllGroups, listMyMemberships, getActiveMemberCounts } from "@/lib/groups/groups";
+import { listAllGroups, listMyMemberships, getActiveMemberCounts, getPendingMembershipCounts } from "@/lib/groups/groups";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Badge } from "@/components/ui/badge";
@@ -23,7 +23,11 @@ export default async function AdminGroupsPage() {
   // needs its own real-membership lookup to know when "Join as admin" is
   // still meaningful versus already done.
   const myRoleByGroup = new Map(myMemberships.map((m) => [m.group.id, m]));
-  const activeMemberCounts = await getActiveMemberCounts(groups.map((g) => g.id));
+  const groupIds = groups.map((g) => g.id);
+  const [activeMemberCounts, pendingMembershipCounts] = await Promise.all([
+    getActiveMemberCounts(groupIds),
+    getPendingMembershipCounts(groupIds),
+  ]);
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 p-4 sm:p-8">
@@ -43,6 +47,7 @@ export default async function AdminGroupsPage() {
         {groups.map((group) => {
           const mine = myRoleByGroup.get(group.id);
           const isActiveAdmin = mine?.status === "active" && mine.role === "admin";
+          const pendingCount = pendingMembershipCounts.get(group.id) ?? 0;
 
           return (
             <li key={group.id}>
@@ -60,7 +65,7 @@ export default async function AdminGroupsPage() {
                       Events
                     </Link>
                     <Link href={`/admin/groups/${group.id}/memberships`} className="underline">
-                      Pending members
+                      Pending members{pendingCount > 0 ? ` (${pendingCount})` : ""}
                     </Link>
                   </div>
                   {!isActiveAdmin && <JoinAsAdminButton groupId={group.id} />}
