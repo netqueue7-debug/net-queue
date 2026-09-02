@@ -18,7 +18,7 @@ Read alongside: `docs/architecture.md` (data model), `docs/conventions.md`.
   - *Check:* real OTP round-trips against a test number.
 
 - [x] **OTP abuse controls.** This is the expensive attack surface — do it now, not later.
-  - Rate limit per phone (3 sends/hour) and per IP (10/hour), backed by Postgres or Upstash Redis.
+  - Rate limit per phone (10 sends/hour) and per IP (10/hour), backed by Postgres or Upstash Redis.
   - Cloudflare Turnstile on the send endpoint.
   - Global daily send ceiling with an alert when crossed.
   - *Check:* an automated test hammering `/auth/otp/send` gets 429s and triggers no further Twilio calls.

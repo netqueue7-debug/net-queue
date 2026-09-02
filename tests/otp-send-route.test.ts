@@ -33,15 +33,15 @@ describe("POST /api/auth/otp/send", () => {
     await prisma.otpSendAttempt.deleteMany({ where: { phone } });
   });
 
-  it("rate-limits after 3 sends for the same phone and stops calling Twilio", async () => {
-    for (let i = 0; i < 3; i++) {
+  it("rate-limits after 10 sends for the same phone and stops calling Twilio", async () => {
+    for (let i = 0; i < 10; i++) {
       const res = await POST(request(phone));
       expect(res.status).toBe(200);
     }
-    expect(sendOtp).toHaveBeenCalledTimes(3);
+    expect(sendOtp).toHaveBeenCalledTimes(10);
 
     const blocked = await POST(request(phone));
     expect(blocked.status).toBe(429);
-    expect(sendOtp).toHaveBeenCalledTimes(3);
+    expect(sendOtp).toHaveBeenCalledTimes(10);
   });
 });
