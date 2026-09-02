@@ -33,7 +33,7 @@ export function WeekView({ anchor, eventsByDay }: { anchor: Date; eventsByDay: M
                       <Card className="px-3 py-2 transition-shadow hover:shadow-md">
                         <p className="truncate font-medium">{e.title}</p>
                         <p className="text-xs text-muted">
-                          {formatTime(e.startsAt)} – {formatTime(e.endsAt)}
+                          {formatTime(e.startsAt, e.timezone)} – {formatTime(e.endsAt, e.timezone)}
                         </p>
                         {e.groupName && (
                           <p className="flex items-center gap-1.5 truncate text-xs text-muted">

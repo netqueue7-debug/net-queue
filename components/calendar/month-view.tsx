@@ -65,7 +65,7 @@ export function MonthView({
                     >
                       <span className="block truncate text-[11px] font-medium">{e.title}</span>
                       <span className="block truncate text-[10px] opacity-80">
-                        {formatTime(e.startsAt)} – {formatTime(e.endsAt)}
+                        {formatTime(e.startsAt, e.timezone)} – {formatTime(e.endsAt, e.timezone)}
                       </span>
                     </Link>
                   ))}

@@ -16,7 +16,7 @@ export function DayView({ events }: { events: EventChip[] }) {
             <Card className="transition-shadow hover:shadow-md">
               <p className="truncate font-medium">{e.title}</p>
               <p className="text-sm text-muted">
-                {formatTime(e.startsAt)} – {formatTime(e.endsAt)}
+                {formatTime(e.startsAt, e.timezone)} – {formatTime(e.endsAt, e.timezone)}
               </p>
               {e.groupName && (
                 <p className="flex items-center gap-1.5 truncate text-sm text-muted">

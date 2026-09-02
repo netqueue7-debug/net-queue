@@ -99,6 +99,7 @@ function LoginPageInner() {
       const body = await res.json();
       const onboardingUrl = next ? `/onboarding?next=${encodeURIComponent(next)}` : "/onboarding";
       router.push(body.needsOnboarding ? onboardingUrl : (next ?? "/home"));
+      router.refresh();
     } finally {
       setLoading(false);
     }

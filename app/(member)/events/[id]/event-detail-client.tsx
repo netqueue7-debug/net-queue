@@ -27,7 +27,7 @@ function toDatetimeLocal(iso: string): string {
 // since the date's already shown by the start.
 function formatEventRange(startsAt: string, endsAt: string, timezone: string): string {
   const sameDay = zonedDateString(new Date(startsAt), timezone) === zonedDateString(new Date(endsAt), timezone);
-  return `${formatDateTime(startsAt)} – ${sameDay ? formatTime(endsAt) : formatDateTime(endsAt)}`;
+  return `${formatDateTime(startsAt, timezone)} – ${sameDay ? formatTime(endsAt, timezone) : formatDateTime(endsAt, timezone)}`;
 }
 
 function MapLinks({ googleMapsUrl, appleMapsUrl }: { googleMapsUrl: string | null; appleMapsUrl: string | null }) {
@@ -202,7 +202,7 @@ export function EventDetailClient({
         </div>
         <p className="text-sm text-muted">{formatEventRange(event.startsAt, event.endsAt, event.timezone)}</p>
         {event.status === "canceled" && <p className="font-medium text-danger">This event has been canceled.</p>}
-        {!signupOpen && <p className="text-sm text-muted">Signup opens {formatDateTime(event.signupOpensAt)}</p>}
+        {!signupOpen && <p className="text-sm text-muted">Signup opens {formatDateTime(event.signupOpensAt, event.timezone)}</p>}
       </div>
 
       {error && <ErrorText>{error}</ErrorText>}
@@ -210,7 +210,7 @@ export function EventDetailClient({
       <div>
         <p className="text-sm font-semibold">{shownLocation ?? "Location TBD"}</p>
         {!event.exactLocation && event.locationRevealsAt && (
-          <p className="text-sm text-muted">Exact location reveals {formatDateTime(event.locationRevealsAt)}</p>
+          <p className="text-sm text-muted">Exact location reveals {formatDateTime(event.locationRevealsAt, event.timezone)}</p>
         )}
         <MapLinks googleMapsUrl={event.googleMapsUrl} appleMapsUrl={event.appleMapsUrl} />
       </div>
@@ -227,7 +227,7 @@ export function EventDetailClient({
             RSVP
           </Button>
           {!signupOpen && event.status !== "canceled" && (
-            <HelperText>Signup isn&apos;t open yet — opens {formatDateTime(event.signupOpensAt)}.</HelperText>
+            <HelperText>Signup isn&apos;t open yet — opens {formatDateTime(event.signupOpensAt, event.timezone)}.</HelperText>
           )}
         </div>
       )}
