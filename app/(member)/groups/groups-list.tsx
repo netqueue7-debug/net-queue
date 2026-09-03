@@ -25,7 +25,7 @@ export interface GroupCardData {
 }
 
 const createEventLinkClass =
-  "flex items-center gap-1.5 rounded-md border border-accent/40 bg-accent/5 px-2.5 py-1.5 text-sm font-medium text-accent transition-colors hover:bg-accent/10";
+  "flex items-center gap-1 rounded-md border border-accent/40 bg-accent/5 px-2 py-1 text-xs font-medium text-accent transition-colors hover:bg-accent/10";
 const navLinkClass = "text-muted transition-colors hover:text-foreground hover:underline";
 
 function SortableGroupCard({ card, origin }: { card: GroupCardData; origin: string }) {
@@ -63,6 +63,14 @@ function SortableGroupCard({ card, origin }: { card: GroupCardData; origin: stri
                   {card.status === "pending" ? "Pending" : card.role === "admin" ? "Admin" : "Member"}
                 </Badge>
               }
+              action={
+                card.status === "active" && card.role === "admin" ? (
+                  <Link href={`/groups/${card.groupId}/calendar?new=1`} className={createEventLinkClass}>
+                    <PlusIcon width={13} height={13} />
+                    Create Event
+                  </Link>
+                ) : undefined
+              }
             />
 
             {card.status === "active" && card.role === "admin" && (
@@ -80,30 +88,22 @@ function SortableGroupCard({ card, origin }: { card: GroupCardData; origin: stri
             )}
 
             {card.status === "active" && (
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-                  <Link href={`/groups/${card.groupId}/members`} className={navLinkClass}>
-                    Members
-                  </Link>
-                  <span aria-hidden className="text-border">
-                    ·
-                  </span>
-                  <Link href={`/groups/${card.groupId}/about`} className={navLinkClass}>
-                    About
-                  </Link>
-                  <span aria-hidden className="text-border">
-                    ·
-                  </span>
-                  <Link href={`/groups/${card.groupId}/calendar`} className={navLinkClass}>
-                    Events
-                  </Link>
-                </div>
-                {card.role === "admin" && (
-                  <Link href={`/groups/${card.groupId}/calendar?new=1`} className={createEventLinkClass}>
-                    <PlusIcon width={15} height={15} />
-                    Create Event
-                  </Link>
-                )}
+              <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+                <Link href={`/groups/${card.groupId}/members`} className={navLinkClass}>
+                  Members
+                </Link>
+                <span aria-hidden className="text-border">
+                  ·
+                </span>
+                <Link href={`/groups/${card.groupId}/about`} className={navLinkClass}>
+                  About
+                </Link>
+                <span aria-hidden className="text-border">
+                  ·
+                </span>
+                <Link href={`/groups/${card.groupId}/calendar`} className={navLinkClass}>
+                  Events
+                </Link>
               </div>
             )}
 

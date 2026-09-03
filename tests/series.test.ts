@@ -1,11 +1,26 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { createSeries, cancelSeries, cancelSeriesWeekday, updateSeries } from "@/lib/events/series";
 import { createRsvp } from "@/lib/rsvp/rsvp";
+import { createSession } from "@/lib/auth/session";
 import { zonedWeekday } from "@/lib/timezone";
 import { computeDerivedStatuses } from "@/lib/rsvp/seat-math";
 import { WAIVER_VERSION } from "@/lib/waivers/content";
 import { addActiveMembership, createTestGroup, deleteTestGroup } from "./helpers/test-group";
+import { PATCH as patchEventRoute } from "@/app/api/events/[id]/route";
+import { PATCH as patchSeriesRoute } from "@/app/api/event-series/[id]/route";
+
+function req(url: string, opts: { method?: string; body?: unknown; token?: string } = {}) {
+  return new NextRequest(url, {
+    method: opts.method ?? "GET",
+    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    headers: {
+      ...(opts.token ? { cookie: `session=${opts.token}` } : {}),
+      ...(opts.body !== undefined ? { "Content-Type": "application/json" } : {}),
+    },
+  });
+}
 
 function localWallClock(instant: Date, timezone: string): string {
   return new Intl.DateTimeFormat("en-US", { timeZone: timezone, hourCycle: "h23", hour: "2-digit", minute: "2-digit" }).format(
@@ -39,6 +54,7 @@ describe("event series", () => {
     "+15555550603",
     "+15555550604",
     "+15555550605",
+    "+15555550606",
   ];
   let adminId: string;
   let groupId: string;
@@ -159,6 +175,107 @@ describe("event series", () => {
     expect(byId.get(pastInstance.id)?.capacity).toBe(4); // untouched — past
     expect(byId.get(overriddenInstance.id)?.capacity).toBe(99); // untouched — overridden
     expect(byId.get(untouchedFutureInstance.id)?.capacity).toBe(7); // propagated
+  });
+
+  it("PATCH /api/events/:id marks the edited instance overridden, protecting it from a later series-wide edit", async () => {
+    const { series } = await createSeries(adminId, {
+      groupId,
+      title: "Overridden Flag Series",
+      description: null,
+      weekdays: [0, 1, 2, 3, 4, 5, 6],
+      startTime: "18:00",
+      endTime: "19:00",
+      timezone: "America/New_York",
+      recurUntil: daysFromNow(6, "America/New_York"),
+      signupOpensRule: "immediately",
+      signupOpensDaysBefore: null,
+      capacity: 4,
+      maxGuestsPerRsvp: null,
+      waiverRequired: false,
+      generalLocation: null,
+      exactLocation: null,
+      googleMapsUrl: null,
+      appleMapsUrl: null,
+      locationRevealPolicy: "always",
+      locationRevealHours: null,
+    });
+
+    const instances = await prisma.event.findMany({ where: { seriesId: series.id }, orderBy: { startsAt: "asc" } });
+    expect(instances.length).toBeGreaterThanOrEqual(2);
+    const target = instances[0];
+    const adminToken = (await createSession(adminId)).token;
+
+    // A plain single-instance edit through the real route — not a direct
+    // Prisma write like the test above — is the thing that was previously
+    // never flipping `overridden` at all (the bug this fix closes).
+    const res = await patchEventRoute(
+      req(`http://localhost/api/events/${target.id}`, { method: "PATCH", token: adminToken, body: { capacity: 99 } }),
+      { params: Promise.resolve({ id: target.id }) },
+    );
+    expect(res.status).toBe(200);
+
+    const afterEdit = await prisma.event.findUniqueOrThrow({ where: { id: target.id } });
+    expect(afterEdit.overridden).toBe(true);
+    expect(afterEdit.capacity).toBe(99);
+
+    const { updatedCount } = await updateSeries(series.id, { capacity: 7 }, adminId);
+    expect(updatedCount).toBe(instances.length - 1); // every instance except the one just hand-edited
+
+    const stillProtected = await prisma.event.findUniqueOrThrow({ where: { id: target.id } });
+    expect(stillProtected.capacity).toBe(99); // untouched by the series edit
+  });
+
+  it("PATCH /api/event-series/:id is group-admin-gated and propagates to future instances", async () => {
+    const member = await prisma.user.create({
+      data: { phone: "+15555550606", waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+    });
+    await addActiveMembership(groupId, member.id, "member");
+    const memberToken = (await createSession(member.id)).token;
+    const adminToken = (await createSession(adminId)).token;
+
+    const { series } = await createSeries(adminId, {
+      groupId,
+      title: "Route-Level Series Edit",
+      description: null,
+      weekdays: [0, 1, 2, 3, 4, 5, 6],
+      startTime: "18:00",
+      endTime: "19:00",
+      timezone: "America/New_York",
+      recurUntil: daysFromNow(6, "America/New_York"),
+      signupOpensRule: "immediately",
+      signupOpensDaysBefore: null,
+      capacity: 4,
+      maxGuestsPerRsvp: null,
+      waiverRequired: false,
+      generalLocation: null,
+      exactLocation: null,
+      googleMapsUrl: null,
+      appleMapsUrl: null,
+      locationRevealPolicy: "always",
+      locationRevealHours: null,
+    });
+
+    const memberAttempt = await patchSeriesRoute(
+      req(`http://localhost/api/event-series/${series.id}`, { method: "PATCH", token: memberToken, body: { title: "Hacked" } }),
+      { params: Promise.resolve({ id: series.id }) },
+    );
+    expect(memberAttempt.status).toBe(403);
+
+    const adminAttempt = await patchSeriesRoute(
+      req(`http://localhost/api/event-series/${series.id}`, {
+        method: "PATCH",
+        token: adminToken,
+        body: { title: "Renamed via Route" },
+      }),
+      { params: Promise.resolve({ id: series.id }) },
+    );
+    expect(adminAttempt.status).toBe(200);
+    const body = await adminAttempt.json();
+    expect(body.series.title).toBe("Renamed via Route");
+    expect(body.updatedCount).toBeGreaterThan(0);
+
+    const instances = await prisma.event.findMany({ where: { seriesId: series.id } });
+    expect(instances.every((i) => i.title === "Renamed via Route")).toBe(true);
   });
 
   it("capacity propagation from a series edit still promotes from the waitlist on affected instances", async () => {

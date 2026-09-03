@@ -121,13 +121,27 @@ async function notifyIfRescheduledOrRelocated(
 // other field is a plain update, still wrapped in its own transaction so a
 // reschedule/relocation diff has a consistent before/after pair to compare.
 // If several fields change in the same call, both diffs run either way.
-export async function updateEvent(id: string, input: Partial<EventFields>, actorUserId?: string): Promise<Event> {
+//
+// `markOverridden` flips `overridden` to true alongside whatever else is
+// being changed — set only by the single-instance edit route (an admin
+// hand-editing one occurrence), never by `updateSeries`'s own propagation
+// loop, which is exactly the "this event vs. all following" distinction
+// `overridden` exists to encode (see the field's comment in schema.prisma
+// and lib/events/series.ts#updateSeries). Left `false` by default so every
+// other existing caller (tests, series propagation) is unaffected.
+export async function updateEvent(
+  id: string,
+  input: Partial<EventFields>,
+  actorUserId?: string,
+  options?: { markOverridden?: boolean },
+): Promise<Event> {
   const notificationIds: string[] = [];
+  const data = options?.markOverridden ? { ...input, overridden: true } : input;
 
   const updated = await (
     "capacity" in input
       ? withEventLock(id, async (tx, before) => {
-          const updatedRow = await tx.event.update({ where: { id }, data: input });
+          const updatedRow = await tx.event.update({ where: { id }, data });
 
           // The edit form always resubmits every field, so "capacity" in
           // input is true on every save, not just ones that actually
@@ -164,7 +178,7 @@ export async function updateEvent(id: string, input: Partial<EventFields>, actor
         })
       : prisma.$transaction(async (tx) => {
           const before = await tx.event.findUniqueOrThrow({ where: { id } });
-          const updatedRow = await tx.event.update({ where: { id }, data: input });
+          const updatedRow = await tx.event.update({ where: { id }, data });
           notificationIds.push(...(await notifyIfRescheduledOrRelocated(tx, id, before, updatedRow, actorUserId)));
           return updatedRow;
         })

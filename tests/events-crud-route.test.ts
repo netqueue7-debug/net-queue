@@ -21,6 +21,7 @@ const baseEventBody = {
   timezone: "America/New_York",
   signupOpensAt: new Date().toISOString(),
   locationRevealPolicy: "always",
+  exactLocation: "123 Main St",
 };
 
 describe("admin single-event CRUD", () => {

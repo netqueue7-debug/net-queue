@@ -301,6 +301,7 @@ describe("groups", () => {
           timezone: "America/New_York",
           signupOpensAt: new Date(Date.now() - 1000).toISOString(),
           locationRevealPolicy: "always",
+          exactLocation: "123 Main St",
         },
       }),
     );
@@ -351,6 +352,7 @@ describe("groups", () => {
           timezone: "America/New_York",
           signupOpensAt: new Date(Date.now() - 1000).toISOString(),
           locationRevealPolicy: "always",
+          exactLocation: "123 Main St",
         },
       }),
     );

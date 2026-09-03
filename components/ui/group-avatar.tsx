@@ -41,11 +41,15 @@ export function GroupCardHeader({
   name,
   imageUrl,
   badge,
+  action,
   size = "md",
 }: {
   name: string;
   imageUrl: string | null;
   badge: ReactNode;
+  // Rendered in the top-right corner of the card, alongside the badge —
+  // e.g. an admin-only "Create Event" shortcut (app/(member)/groups/groups-list.tsx).
+  action?: ReactNode;
   size?: keyof typeof SIZE_CLASSES;
 }) {
   if (imageUrl) {
@@ -55,7 +59,10 @@ export function GroupCardHeader({
         <img src={imageUrl} alt="" className="aspect-[2/1] w-full rounded-lg object-cover" />
         <div className="flex items-center justify-between gap-2">
           <span className="truncate font-medium">{name}</span>
-          {badge}
+          <div className="flex flex-shrink-0 items-center gap-2">
+            {badge}
+            {action}
+          </div>
         </div>
       </div>
     );
@@ -65,7 +72,10 @@ export function GroupCardHeader({
       <GroupAvatar name={name} imageUrl={null} size={size} />
       <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
         <span className="truncate font-medium">{name}</span>
-        {badge}
+        <div className="flex flex-shrink-0 items-center gap-2">
+          {badge}
+          {action}
+        </div>
       </div>
     </div>
   );

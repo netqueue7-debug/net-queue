@@ -6,22 +6,13 @@ import { useState } from "react";
 import type { EventDetail, GuestSummary, RsvpListItem } from "@/lib/rsvp/event-detail";
 import { formatDateTime, formatTime } from "@/lib/format-datetime";
 import { zonedDateString } from "@/lib/timezone";
-import { EventForm, type EventFormBody } from "@/app/admin/events/event-form";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/inputs";
 import { ErrorText, HelperText } from "@/components/ui/text";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Linkify } from "@/components/ui/linkify";
-import { LogIcon, PencilIcon, TrashIcon } from "@/components/ui/icons";
 import { GROUP_CHIP_CLASS, GROUP_DOT_CLASS, groupColorTone } from "@/components/calendar/group-color";
 import { EventComments } from "./event-comments";
-import { SeriesActions } from "./series-actions";
-
-function toDatetimeLocal(iso: string): string {
-  const d = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
+import { EventAdminMenu } from "./event-admin-menu";
 
 // End time only repeats the full date when it actually falls on a
 // different calendar day in the event's own timezone (rare, but the
@@ -69,9 +60,7 @@ export function EventDetailClient({
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [editing, setEditing] = useState(false);
   const [guestNames, setGuestNames] = useState("");
-  const [confirmingCancel, setConfirmingCancel] = useState(false);
 
   async function withLoading(fn: () => Promise<Response>) {
     setError(null);
@@ -116,25 +105,6 @@ export function EventDetailClient({
   const handleRemoveGuest = (guestId: string) => withLoading(() => fetch(`/api/guests/${guestId}`, { method: "DELETE" }));
   const handleApproveGuest = (guestId: string) => withLoading(() => fetch(`/api/guests/${guestId}/approve`, { method: "POST" }));
   const handleRejectGuest = (guestId: string) => withLoading(() => fetch(`/api/guests/${guestId}/reject`, { method: "POST" }));
-
-  async function handleCancelEvent() {
-    setConfirmingCancel(false);
-    await withLoading(() => fetch(`/api/events/${eventId}`, { method: "DELETE" }));
-  }
-
-  async function handleEditSubmit(body: EventFormBody) {
-    const res = await fetch(`/api/events/${eventId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      const b = await res.json().catch(() => ({}));
-      return { ok: false, error: b.error ?? "Failed to save changes." };
-    }
-    router.refresh();
-    return { ok: true };
-  }
 
   const { event, group, going, waitlist, canceled, yourRsvp, series } = detail;
   const signupOpen = new Date() >= new Date(event.signupOpensAt);
@@ -345,70 +315,7 @@ export function EventDetailClient({
         <EventComments eventId={eventId} comments={detail.comments} viewerUserId={viewerUserId} viewerRole={viewerRole} />
       </div>
 
-      {viewerRole === "admin" && (
-        <div className="flex flex-wrap items-center gap-2 border-t border-border pt-5">
-          <Link
-            href={`/events/${eventId}/log`}
-            className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-sm hover:border-accent/40 hover:bg-accent/5"
-          >
-            <LogIcon width={16} height={16} />
-            View log
-          </Link>
-          <Button variant="secondary" className="gap-1.5 px-2.5 py-1.5 text-sm" onClick={() => setEditing((v) => !v)}>
-            <PencilIcon width={16} height={16} />
-            {editing ? "Cancel editing" : "Edit event"}
-          </Button>
-          {event.status !== "canceled" && (
-            <Button
-              variant="destructive"
-              className="gap-1.5 px-2.5 py-1.5 text-sm"
-              onClick={() => setConfirmingCancel(true)}
-              disabled={loading}
-            >
-              <TrashIcon width={16} height={16} />
-              Cancel event
-            </Button>
-          )}
-        </div>
-      )}
-
-      {viewerRole === "admin" && series && <SeriesActions seriesId={series.id} weekdays={series.weekdays} />}
-
-      {viewerRole === "admin" && editing && (
-        <EventForm
-          submitLabel="Save changes"
-          onSubmit={handleEditSubmit}
-          onSuccess={() => setEditing(false)}
-          initialValues={{
-            title: event.title,
-            description: event.description ?? "",
-            startsAt: toDatetimeLocal(event.startsAt),
-            endsAt: toDatetimeLocal(event.endsAt),
-            signupOpensAt: toDatetimeLocal(event.signupOpensAt),
-            timezone: event.timezone,
-            capacity: event.capacity?.toString() ?? "",
-            maxGuestsPerRsvp: event.maxGuestsPerRsvp?.toString() ?? "",
-            waiverRequired: event.waiverRequired,
-            generalLocation: event.generalLocation ?? "",
-            exactLocation: event.exactLocation ?? "",
-            googleMapsUrl: event.googleMapsUrl ?? "",
-            appleMapsUrl: event.appleMapsUrl ?? "",
-            locationRevealPolicy: event.locationRevealPolicy,
-            locationRevealHours: event.locationRevealHours?.toString() ?? "",
-          }}
-        />
-      )}
-
-      <ConfirmDialog
-        open={confirmingCancel}
-        title="Cancel this event?"
-        description="This does not delete it, but members will see it as canceled."
-        confirmLabel="Cancel event"
-        cancelLabel="Never mind"
-        loading={loading}
-        onConfirm={handleCancelEvent}
-        onCancel={() => setConfirmingCancel(false)}
-      />
+      {viewerRole === "admin" && <EventAdminMenu eventId={eventId} event={event} series={series} />}
     </main>
   );
 }

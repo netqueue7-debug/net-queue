@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input, Textarea, Select } from "@/components/ui/inputs";
 import { ErrorText } from "@/components/ui/text";
 import { US_TIMEZONES } from "@/lib/us-timezones";
+import { autofillMapsLinksOnBlur } from "@/lib/maps-links";
+import { looksLikeAddress, EXACT_LOCATION_HINT } from "@/lib/events/exact-location";
 
 const WEEKDAYS = [
   { value: 0, label: "Sun" },
@@ -56,6 +58,13 @@ export function CreateSeriesForm({ groupId, onSuccess }: { groupId: string; onSu
     const maxGuestsRaw = form.get("maxGuestsPerRsvp") as string;
     const daysBeforeRaw = form.get("signupOpensDaysBefore") as string;
     const revealHoursRaw = form.get("locationRevealHours") as string;
+    const exactLocation = form.get("exactLocation") as string;
+
+    if (!looksLikeAddress(exactLocation)) {
+      setError(EXACT_LOCATION_HINT);
+      setLoading(false);
+      return;
+    }
 
     const body = {
       groupId,
@@ -73,7 +82,7 @@ export function CreateSeriesForm({ groupId, onSuccess }: { groupId: string; onSu
       maxGuestsPerRsvp: maxGuestsRaw ? Number(maxGuestsRaw) : null,
       waiverRequired: form.get("waiverRequired") === "on",
       generalLocation: (form.get("generalLocation") as string) || null,
-      exactLocation: (form.get("exactLocation") as string) || null,
+      exactLocation,
       googleMapsUrl: (form.get("googleMapsUrl") as string) || null,
       appleMapsUrl: (form.get("appleMapsUrl") as string) || null,
       locationRevealPolicy: form.get("locationRevealPolicy"),
@@ -174,7 +183,12 @@ export function CreateSeriesForm({ groupId, onSuccess }: { groupId: string; onSu
       <div className={sectionClass}>
         <h3 className={sectionHeaderClass}>Location</h3>
         <Input name="generalLocation" placeholder="General location" />
-        <Input name="exactLocation" placeholder="Exact location" />
+        <Input
+          name="exactLocation"
+          placeholder='Exact location — a real address (e.g. "123 Main St, Springfield")'
+          required
+          onBlur={autofillMapsLinksOnBlur}
+        />
         <Input name="googleMapsUrl" type="url" placeholder="Google Maps link (optional)" />
         <Input name="appleMapsUrl" type="url" placeholder="Apple Maps link (optional)" />
         <Select name="locationRevealPolicy" defaultValue="always">

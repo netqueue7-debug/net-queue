@@ -22,6 +22,11 @@ export interface SerializedEvent {
   googleMapsUrl: string | null;
   appleMapsUrl: string | null;
   locationRevealsAt: string | null;
+  // Hand-edited independently of its series (lib/events/series.ts's
+  // "this event vs. all following" model) — a future series-wide edit
+  // skips this instance permanently. Not sensitive, shown to every viewer
+  // so the admin UI can explain why "Edit series" won't touch it.
+  overridden: boolean;
 }
 
 // Exported for lib/notifications/jobs.ts's location-reveal cron job — same
@@ -62,6 +67,7 @@ export function serializeEvent(
     status: event.status,
     locationRevealPolicy: event.locationRevealPolicy,
     locationRevealHours: event.locationRevealHours,
+    overridden: event.overridden,
   };
 
   if (viewerRole === "admin") {

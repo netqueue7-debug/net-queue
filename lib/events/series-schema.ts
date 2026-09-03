@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { optionalMapUrl } from "./schema";
+import { optionalMapUrl, exactLocationSchema } from "./schema";
 
 const validTimezones = new Set(Intl.supportedValuesOf("timeZone"));
 const timezone = z.string().refine((tz) => validTimezones.has(tz), { message: "Not a recognized IANA timezone." });
@@ -31,7 +31,7 @@ export const createSeriesSchema = z
     maxGuestsPerRsvp: z.number().int().nonnegative().nullable().optional(),
     waiverRequired: z.boolean().optional(),
     generalLocation: z.string().trim().max(500).nullable().optional(),
-    exactLocation: z.string().trim().max(500).nullable().optional(),
+    exactLocation: exactLocationSchema,
     googleMapsUrl: optionalMapUrl,
     appleMapsUrl: optionalMapUrl,
     locationRevealPolicy,
@@ -57,7 +57,6 @@ export const createSeriesSchema = z
     maxGuestsPerRsvp: v.maxGuestsPerRsvp ?? null,
     waiverRequired: v.waiverRequired ?? false,
     generalLocation: v.generalLocation ?? null,
-    exactLocation: v.exactLocation ?? null,
     googleMapsUrl: v.googleMapsUrl ? v.googleMapsUrl : null,
     appleMapsUrl: v.appleMapsUrl ? v.appleMapsUrl : null,
     locationRevealHours: v.locationRevealHours ?? null,
@@ -78,7 +77,7 @@ export const updateSeriesSchema = z
     maxGuestsPerRsvp: z.number().int().nonnegative().nullable(),
     waiverRequired: z.boolean(),
     generalLocation: z.string().trim().max(500).nullable(),
-    exactLocation: z.string().trim().max(500).nullable(),
+    exactLocation: exactLocationSchema,
     googleMapsUrl: optionalMapUrl,
     appleMapsUrl: optionalMapUrl,
     locationRevealPolicy,
