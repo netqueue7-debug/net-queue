@@ -18,6 +18,12 @@ function describe(n: InAppNotification): string {
       return `You were approved to join ${payload.groupName ?? "a group"}.`;
     case "group_membership_rejected":
       return `Your request to join ${payload.groupName ?? "a group"} was not approved.`;
+    case "group_upgrade_requested":
+      return `${payload.groupName ?? "A group"} is asking to raise its member limit${payload.requestedLimit ? ` to ${payload.requestedLimit}` : ""}.`;
+    case "group_upgrade_resolved":
+      return payload.decision === "approved"
+        ? `${payload.groupName ?? "Your group"}'s member limit was raised${payload.newLimit ? ` to ${payload.newLimit}` : ""}.`
+        : `The request to raise ${payload.groupName ?? "your group"}'s member limit was declined.`;
     case "capacity_changed":
       return `Capacity for ${payload.eventTitle} changed from ${payload.from ?? "unlimited"} to ${payload.to ?? "unlimited"}.`;
     case "waiver_reminder":
@@ -44,7 +50,14 @@ export function NotificationItem({ notification }: { notification: InAppNotifica
   // Only the approved case is actually reachable — a rejected membership
   // 404s on the group's pages (resolveGroupMembership requires `active`).
   const payload = notification.payload as Record<string, unknown>;
-  const groupHref = notification.type === "group_membership_approved" ? `/groups/${payload.groupId}/calendar` : null;
+  const groupHref =
+    notification.type === "group_membership_approved"
+      ? `/groups/${payload.groupId}/calendar`
+      : notification.type === "group_upgrade_resolved"
+        ? `/groups/${payload.groupId}/about`
+        : notification.type === "group_upgrade_requested"
+          ? "/admin/group-upgrade-requests"
+          : null;
 
   async function handleMarkRead() {
     await fetch(`/api/notifications/${notification.id}/read`, { method: "POST" });

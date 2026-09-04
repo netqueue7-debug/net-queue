@@ -4,6 +4,7 @@ import { needsOnboarding } from "@/lib/auth/onboarding";
 import { countUnreadNotifications } from "@/lib/notifications/notifications";
 import { getDefaultAdminGroupId } from "@/lib/groups/authz";
 import { getPendingMembershipCountForAdmin } from "@/lib/groups/groups";
+import { getPendingUpgradeRequestCount } from "@/lib/groups/upgrade-requests";
 import { CalendarIcon, UsersIcon, BellIcon, ShieldIcon } from "./icons";
 import { AvatarMenu } from "./avatar-menu";
 
@@ -21,10 +22,12 @@ export async function Nav() {
   // card's Members section), so the pending count rides on the Groups link
   // for them instead of a link into a section they no longer use.
   const isGroupAdmin = adminGroupId !== null;
-  const [platformPendingCount, groupPendingCount] = await Promise.all([
+  const [platformPendingMemberships, groupPendingCount, platformPendingUpgradeRequests] = await Promise.all([
     isPlatformAdmin ? getPendingMembershipCountForAdmin(user.id, true) : Promise.resolve(0),
     isGroupAdmin ? getPendingMembershipCountForAdmin(user.id, false) : Promise.resolve(0),
+    isPlatformAdmin ? getPendingUpgradeRequestCount() : Promise.resolve(0),
   ]);
+  const platformPendingCount = platformPendingMemberships + platformPendingUpgradeRequests;
   const initial = (user.displayName ?? "?").trim().charAt(0).toUpperCase();
 
   return (

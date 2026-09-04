@@ -79,6 +79,12 @@ enum GroupMembershipStatus {
   rejected
 }
 
+enum GroupUpgradeRequestStatus {
+  pending
+  approved
+  denied
+}
+
 enum GuestAddedByRole {
   user
   admin
@@ -106,6 +112,8 @@ enum NotificationType {
   guest_rejected
   group_membership_approved
   group_membership_rejected
+  group_upgrade_requested
+  group_upgrade_resolved
   capacity_changed
   waiver_reminder
   location_reveal
@@ -152,6 +160,8 @@ model User {
   eventComments     EventComment[]
   pushSubscriptions PushSubscription[]
   feedback          Feedback[]
+  upgradeRequestsMade     GroupUpgradeRequest[] @relation("GroupUpgradeRequester")
+  upgradeRequestsResolved GroupUpgradeRequest[] @relation("GroupUpgradeResolver")
 
   @@map("users")
 }
@@ -222,8 +232,37 @@ model Group {
   events           Event[]
   eventSeries      EventSeries[]
   waiverSignatures WaiverSignature[]
+  upgradeRequests  GroupUpgradeRequest[]
 
   @@map("groups")
+}
+
+// A group admin's ask to raise `Group.memberLimit` — no payment processing
+// here, just a tracked request/response so "contact a platform admin" (the
+// only path before this) becomes a real queue instead of an out-of-band
+// text/email. `requestedLimit` is nullable: an admin may not know exactly
+// what they need and just wants to start a conversation. Approving doesn't
+// require using `requestedLimit` verbatim — see
+// lib/groups/upgrade-requests.ts#resolveUpgradeRequest, which takes the
+// platform admin's own chosen `newLimit`.
+model GroupUpgradeRequest {
+  id             String                    @id @default(cuid())
+  groupId        String                    @map("group_id")
+  requestedBy    String                    @map("requested_by")
+  requestedLimit Int?                      @map("requested_limit")
+  message        String?
+  status         GroupUpgradeRequestStatus @default(pending)
+  createdAt      DateTime                  @default(now()) @map("created_at")
+  resolvedAt     DateTime?                 @map("resolved_at")
+  resolvedBy     String?                   @map("resolved_by")
+
+  group     Group @relation(fields: [groupId], references: [id])
+  requester User  @relation("GroupUpgradeRequester", fields: [requestedBy], references: [id])
+  resolver  User? @relation("GroupUpgradeResolver", fields: [resolvedBy], references: [id])
+
+  @@index([groupId, status])
+  @@index([status, createdAt])
+  @@map("group_upgrade_requests")
 }
 
 // One row per (group, user). This is where per-group admin-ness and the

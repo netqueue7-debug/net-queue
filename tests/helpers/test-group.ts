@@ -17,6 +17,7 @@ export async function createTestGroup(creatorUserId: string, name = "Test Group"
 
 export async function deleteTestGroup(groupId: string) {
   await prisma.groupMembership.deleteMany({ where: { groupId } });
+  await prisma.groupUpgradeRequest.deleteMany({ where: { groupId } });
   await prisma.group.delete({ where: { id: groupId } });
 }
 

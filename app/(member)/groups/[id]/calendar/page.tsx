@@ -18,7 +18,7 @@ export default async function GroupCalendarPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ date?: string; new?: string }>;
+  searchParams: Promise<{ date?: string; new?: string; from?: string }>;
 }) {
   const user = await getSession();
   if (!user) redirect("/login");
@@ -69,15 +69,16 @@ export default async function GroupCalendarPage({
   const canGoPrev = startOfMonth(prevAnchor) >= startOfMonth(winStart);
   const canGoNext = startOfMonth(nextAnchor) <= startOfMonth(winEnd);
 
-  const hrefFor = (date: Date) => `/groups/${id}/calendar?date=${dateKey(date)}`;
+  const cameFromHome = sp.from === "home";
+  const hrefFor = (date: Date) => `/groups/${id}/calendar?date=${dateKey(date)}${cameFromHome ? "&from=home" : ""}`;
   const navButtonClass = "rounded-md border border-border px-2.5 py-1 text-sm hover:border-accent/40 hover:bg-accent/5";
   const navButtonDisabledClass = "rounded-md border border-border px-2.5 py-1 text-sm text-muted/40";
 
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 p-4 sm:p-8">
       <div>
-        <Link href="/groups" className="text-sm text-muted hover:underline">
-          ← Your groups
+        <Link href={cameFromHome ? "/home" : "/groups"} className="text-sm text-muted hover:underline">
+          {cameFromHome ? "← Home" : "← Your groups"}
         </Link>
         <h1 className="text-2xl font-semibold">{group.name}</h1>
       </div>

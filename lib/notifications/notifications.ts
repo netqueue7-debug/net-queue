@@ -85,7 +85,9 @@ function renderPushPayload(type: NotificationType, payload: any, eventId: string
     ? `/events/${eventId}`
     : type === "group_membership_approved"
       ? `/groups/${payload.groupId}/calendar`
-      : "/notifications";
+      : type === "group_upgrade_resolved"
+        ? `/groups/${payload.groupId}/about`
+        : "/notifications";
 
   switch (type) {
     case "guest_approved":
@@ -96,6 +98,21 @@ function renderPushPayload(type: NotificationType, payload: any, eventId: string
       return { title: "Group request approved", body: `You were approved to join ${payload.groupName ?? "a group"}.`, url };
     case "group_membership_rejected":
       return { title: "Group request declined", body: `Your request to join ${payload.groupName ?? "a group"} was not approved.`, url };
+    case "group_upgrade_requested":
+      return {
+        title: "Member limit increase requested",
+        body: `${payload.groupName ?? "A group"} is asking to raise its member limit${payload.requestedLimit ? ` to ${payload.requestedLimit}` : ""}.`,
+        url: "/admin/group-upgrade-requests",
+      };
+    case "group_upgrade_resolved":
+      return {
+        title: payload.decision === "approved" ? "Member limit increased" : "Upgrade request declined",
+        body:
+          payload.decision === "approved"
+            ? `${payload.groupName ?? "Your group"}'s member limit was raised${payload.newLimit ? ` to ${payload.newLimit}` : ""}.`
+            : `The request to raise ${payload.groupName ?? "your group"}'s member limit was declined.`,
+        url,
+      };
     case "capacity_changed":
       return {
         title: "Capacity changed",

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ErrorText } from "@/components/ui/text";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { RequestUpgradeForm } from "./request-upgrade-form";
 
 // `origin` is resolved server-side (from the request's own Host header,
 // via next/headers in page.tsx) rather than read from `window.location` —
@@ -16,12 +17,14 @@ export function InviteLinkCard({
   initialJoinCode,
   memberLimit,
   activeMemberCount,
+  hasPendingUpgradeRequest,
 }: {
   groupId: string;
   origin: string;
   initialJoinCode: string;
   memberLimit: number | null;
   activeMemberCount: number;
+  hasPendingUpgradeRequest: boolean;
 }) {
   const [joinCode, setJoinCode] = useState(initialJoinCode);
   const [copied, setCopied] = useState(false);
@@ -64,10 +67,12 @@ export function InviteLinkCard({
         {memberLimit !== null && ` Currently ${activeMemberCount}/${memberLimit} members.`}
       </p>
       {atCapacity && (
-        <p className="text-sm text-warning">
-          This group is at its member limit — new joins won&apos;t work until it&apos;s increased. Contact a platform
-          admin to upgrade.
-        </p>
+        <div className="flex flex-col gap-2 rounded-md border border-warning/40 bg-warning/5 p-3">
+          <p className="text-sm text-warning">
+            This group is at its member limit — new joins won&apos;t work until it&apos;s increased.
+          </p>
+          <RequestUpgradeForm groupId={groupId} hasPendingRequest={hasPendingUpgradeRequest} />
+        </div>
       )}
       <div className="flex flex-wrap items-center gap-2">
         <code
