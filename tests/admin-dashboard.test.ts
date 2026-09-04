@@ -4,7 +4,6 @@ import { createRsvp } from "@/lib/rsvp/rsvp";
 import { addGuests, approveGuest } from "@/lib/guests/guests";
 import { getGroupEventsDashboard, getGroupDashboardSummary } from "@/lib/admin/dashboard";
 import { getMemberAttendanceInGroup } from "@/lib/admin/attendance";
-import { WAIVER_VERSION } from "@/lib/waivers/content";
 import { addActiveMembership, createTestGroup, deleteTestGroup } from "./helpers/test-group";
 
 describe("admin dashboard stats", () => {
@@ -17,10 +16,10 @@ describe("admin dashboard stats", () => {
 
   beforeAll(async () => {
     const admin = await prisma.user.create({
-      data: { phone: adminPhone, role: "admin", waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone: adminPhone, role: "admin" },
     });
     const member = await prisma.user.create({
-      data: { phone: memberPhone, waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone: memberPhone },
     });
     adminId = admin.id;
     memberId = member.id;

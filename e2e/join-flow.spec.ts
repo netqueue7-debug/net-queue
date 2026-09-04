@@ -102,7 +102,7 @@ test.describe("join flow", () => {
     const adminPage = await adminContext.newPage();
     await addSessionCookie(adminContext, fixtures.groupAdminToken, fixtures.groupAdminExpiresAt);
 
-    await adminPage.goto(`/admin/groups/${fixtures.approvalGroupId}/memberships`);
+    await adminPage.goto(`/groups/${fixtures.approvalGroupId}/members`);
     await expect(adminPage.getByText("E2E Approval Joiner")).toBeVisible();
     await adminPage.getByRole("button", { name: "Approve" }).click();
     await expect(adminPage.getByText("No pending join requests.")).toBeVisible();

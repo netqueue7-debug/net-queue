@@ -1,8 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import { createRsvp } from "@/lib/rsvp/rsvp";
-import { runLocationRevealJob, runDayBeforeReminderJob } from "@/lib/notifications/jobs";
-import { WAIVER_VERSION } from "@/lib/waivers/content";
+import { runLocationRevealJob, runDayBeforeReminderJob, runSignupOpenedJob } from "@/lib/notifications/jobs";
 import { addActiveMembership, createTestGroup, deleteTestGroup } from "./helpers/test-group";
 
 describe("notification cron jobs", () => {
@@ -14,10 +13,10 @@ describe("notification cron jobs", () => {
 
   beforeAll(async () => {
     const admin = await prisma.user.create({
-      data: { phone: adminPhone, role: "admin", waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone: adminPhone, role: "admin" },
     });
     const member = await prisma.user.create({
-      data: { phone: memberPhone, waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone: memberPhone },
     });
     adminId = admin.id;
     memberId = member.id;
@@ -119,7 +118,7 @@ describe("notification cron jobs", () => {
     });
 
     const other = await prisma.user.create({
-      data: { phone: "+15555551102", waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone: "+15555551102" },
     });
     await addActiveMembership(groupId, other.id);
 
@@ -145,5 +144,63 @@ describe("notification cron jobs", () => {
     await prisma.rsvp.deleteMany({ where: { userId: other.id } });
     await prisma.groupMembership.deleteMany({ where: { userId: other.id } });
     await prisma.user.delete({ where: { id: other.id } });
+  });
+
+  it("signup opened: notifies every active group member (not just RSVP holders) once signup opens, and only once", async () => {
+    const event = await prisma.event.create({
+      data: {
+        groupId,
+        title: "Signup Opened Job Test Night",
+        startsAt: new Date(Date.now() + 60 * 60 * 1000),
+        endsAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
+        timezone: "America/New_York",
+        signupOpensAt: new Date(Date.now() - 1000), // already open
+        locationRevealPolicy: "always",
+        capacity: 10,
+        createdBy: adminId,
+      },
+    });
+    // Neither adminId nor memberId has RSVP'd — they should still be notified.
+
+    const firstRun = await runSignupOpenedJob(new Date(), groupId);
+    expect(firstRun).toBeGreaterThanOrEqual(2); // admin + member
+
+    const adminNotified = await prisma.notification.findFirst({
+      where: { eventId: event.id, userId: adminId, type: "signup_opened" },
+    });
+    const memberNotified = await prisma.notification.findFirst({
+      where: { eventId: event.id, userId: memberId, type: "signup_opened" },
+    });
+    expect(adminNotified).not.toBeNull();
+    expect(memberNotified).not.toBeNull();
+
+    const secondRun = await runSignupOpenedJob(new Date(), groupId);
+    expect(secondRun).toBe(0); // idempotent — nothing sent twice
+
+    const allNotifications = await prisma.notification.findMany({
+      where: { eventId: event.id, userId: memberId, type: "signup_opened" },
+    });
+    expect(allNotifications).toHaveLength(1);
+  });
+
+  it("signup opened: an event whose signup hasn't opened yet is never notified", async () => {
+    const event = await prisma.event.create({
+      data: {
+        groupId,
+        title: "Not Yet Open Night",
+        startsAt: new Date(Date.now() + 60 * 60 * 1000),
+        endsAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
+        timezone: "America/New_York",
+        signupOpensAt: new Date(Date.now() + 30 * 60 * 1000), // opens in 30 minutes
+        locationRevealPolicy: "always",
+        capacity: 10,
+        createdBy: adminId,
+      },
+    });
+
+    await runSignupOpenedJob(new Date(), groupId);
+
+    const notification = await prisma.notification.findFirst({ where: { eventId: event.id, type: "signup_opened" } });
+    expect(notification).toBeNull();
   });
 });

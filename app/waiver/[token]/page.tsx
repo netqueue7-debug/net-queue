@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
 import { getGuestByWaiverToken } from "@/lib/guests/guests";
-import { WAIVER_MARKDOWN } from "@/lib/waivers/content";
 import { SignWaiverForm } from "./sign-waiver-form";
 import { WaiverPanel } from "@/components/ui/waiver-panel";
 
@@ -14,11 +13,13 @@ export default async function GuestWaiverPage({ params }: { params: Promise<{ to
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 p-4 sm:p-8">
       <h1 className="text-2xl font-semibold">Guest waiver — {guest.eventTitle}</h1>
 
-      {guest.waiverSignedAt ? (
+      {guest.waiverContent === null ? (
+        <p className="text-muted">No waiver is required for this event.</p>
+      ) : guest.waiverSignedAt ? (
         <p className="text-muted">This waiver has already been signed. Thanks!</p>
       ) : (
         <>
-          <WaiverPanel content={WAIVER_MARKDOWN} />
+          <WaiverPanel content={guest.waiverContent} />
           <SignWaiverForm token={token} initialName={guest.name ?? ""} />
         </>
       )}

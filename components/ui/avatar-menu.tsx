@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { createPortal } from "react-dom";
 import { useEffect, useRef, useState } from "react";
-import { SettingsIcon, LogoutIcon } from "./icons";
+import { SettingsIcon, AlertIcon, LogoutIcon } from "./icons";
 
 const menuItemClass = "flex items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-accent/8";
 
@@ -92,6 +92,10 @@ export function AvatarMenu({ avatarUrl, initial }: { avatarUrl: string | null; i
             <Link href="/settings" role="menuitem" className={menuItemClass} onClick={() => setOpen(false)}>
               <SettingsIcon width={16} height={16} />
               Settings
+            </Link>
+            <Link href="/feedback" role="menuitem" className={menuItemClass} onClick={() => setOpen(false)}>
+              <AlertIcon width={16} height={16} />
+              Feedback
             </Link>
             <button
               type="button"

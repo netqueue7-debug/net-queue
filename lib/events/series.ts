@@ -1,7 +1,8 @@
 import { prisma } from "@/lib/db";
-import { zonedTimeToUtc } from "@/lib/timezone";
+import { zonedTimeToUtc, zonedWeekday } from "@/lib/timezone";
 import { generateOccurrenceDates, materializeOccurrence } from "./recurrence";
 import { cancelEvent, updateEvent, type EventFields } from "./events";
+import { assertGroupWaiverConfigured } from "@/lib/groups/groups";
 import type { EventSeries } from "@/lib/generated/prisma/client";
 
 export interface CreateSeriesInput {
@@ -42,6 +43,11 @@ export async function createSeries(
   createdBy: string,
   input: CreateSeriesInput,
 ): Promise<{ series: EventSeries; eventsCreated: number }> {
+  if (input.waiverRequired) {
+    const group = await prisma.group.findUniqueOrThrow({ where: { id: input.groupId } });
+    assertGroupWaiverConfigured(group);
+  }
+
   const materializedAt = new Date();
   const recurUntilInstant = zonedTimeToUtc(input.recurUntil, "12:00", input.timezone);
   const recurStartsAtInstant = input.recurStartsAt ? zonedTimeToUtc(input.recurStartsAt, "12:00", input.timezone) : materializedAt;
@@ -147,6 +153,12 @@ export async function updateSeries(
   input: UpdateSeriesInput,
   actorUserId: string,
 ): Promise<{ series: EventSeries; updatedCount: number }> {
+  if (input.waiverRequired) {
+    const { groupId } = await prisma.eventSeries.findUniqueOrThrow({ where: { id: seriesId }, select: { groupId: true } });
+    const group = await prisma.group.findUniqueOrThrow({ where: { id: groupId } });
+    assertGroupWaiverConfigured(group);
+  }
+
   const series = await prisma.eventSeries.update({ where: { id: seriesId }, data: input });
 
   const futureInstances = await prisma.event.findMany({
@@ -178,4 +190,40 @@ export async function cancelSeries(seriesId: string, actorUserId: string): Promi
   }
 
   return { canceledCount: futureInstances.length };
+}
+
+// Cancels every future instance that falls on `weekday` (0=Sun..6=Sat, an
+// instance's own weekday recovered via `zonedWeekday` against its own
+// `timezone` — same numbering `createSeries` took `weekdays` in) —
+// overridden or not, same "calling off overrides individual customization"
+// philosophy as `cancelSeries` (this is a series-level decision that a
+// given weekday is done, not a per-instance edit). For a series that runs
+// multiple weekdays (e.g. Tue/Thu), this drops just one of them; the rest
+// of the series is untouched. Past instances are never touched. Also drops
+// `weekday` from the series' own `weekdays` so it reads correctly going
+// forward and a future horizon top-up (not yet built) won't regenerate it.
+export async function cancelSeriesWeekday(
+  seriesId: string,
+  weekday: number,
+  actorUserId: string,
+): Promise<{ canceledCount: number }> {
+  const series = await prisma.eventSeries.findUniqueOrThrow({ where: { id: seriesId } });
+
+  const futureInstances = await prisma.event.findMany({
+    where: { seriesId, status: "scheduled", startsAt: { gt: new Date() } },
+    select: { id: true, startsAt: true, timezone: true },
+  });
+
+  const onWeekday = futureInstances.filter((instance) => zonedWeekday(instance.startsAt, instance.timezone) === weekday);
+
+  for (const { id } of onWeekday) {
+    await cancelEvent(id, actorUserId);
+  }
+
+  await prisma.eventSeries.update({
+    where: { id: seriesId },
+    data: { weekdays: series.weekdays.filter((d) => d !== weekday) },
+  });
+
+  return { canceledCount: onWeekday.length };
 }

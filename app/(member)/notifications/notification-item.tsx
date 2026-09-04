@@ -14,6 +14,16 @@ function describe(n: InAppNotification): string {
       return `${payload.guestName ?? "Your guest"} was approved.`;
     case "guest_rejected":
       return `${payload.guestName ?? "Your guest"} was not approved.`;
+    case "group_membership_approved":
+      return `You were approved to join ${payload.groupName ?? "a group"}.`;
+    case "group_membership_rejected":
+      return `Your request to join ${payload.groupName ?? "a group"} was not approved.`;
+    case "group_upgrade_requested":
+      return `${payload.groupName ?? "A group"} is asking to raise its member limit${payload.requestedLimit ? ` to ${payload.requestedLimit}` : ""}.`;
+    case "group_upgrade_resolved":
+      return payload.decision === "approved"
+        ? `${payload.groupName ?? "Your group"}'s member limit was raised${payload.newLimit ? ` to ${payload.newLimit}` : ""}.`
+        : `The request to raise ${payload.groupName ?? "your group"}'s member limit was declined.`;
     case "capacity_changed":
       return `Capacity for ${payload.eventTitle} changed from ${payload.from ?? "unlimited"} to ${payload.to ?? "unlimited"}.`;
     case "waiver_reminder":
@@ -22,6 +32,8 @@ function describe(n: InAppNotification): string {
       return `Location revealed for ${payload.eventTitle}.`;
     case "day_before_reminder":
       return `Reminder: ${payload.eventTitle} is tomorrow.`;
+    case "signup_opened":
+      return `RSVPs are now open for ${payload.eventTitle}.`;
     case "event_comment_posted": {
       const text = String(payload.commentBody ?? "");
       const preview = text.length > 80 ? `${text.slice(0, 80)}…` : text;
@@ -35,6 +47,17 @@ function describe(n: InAppNotification): string {
 export function NotificationItem({ notification }: { notification: InAppNotification }) {
   const router = useRouter();
   const unread = !notification.readAt;
+  // Only the approved case is actually reachable — a rejected membership
+  // 404s on the group's pages (resolveGroupMembership requires `active`).
+  const payload = notification.payload as Record<string, unknown>;
+  const groupHref =
+    notification.type === "group_membership_approved"
+      ? `/groups/${payload.groupId}/calendar`
+      : notification.type === "group_upgrade_resolved"
+        ? `/groups/${payload.groupId}/about`
+        : notification.type === "group_upgrade_requested"
+          ? "/admin/group-upgrade-requests"
+          : null;
 
   async function handleMarkRead() {
     await fetch(`/api/notifications/${notification.id}/read`, { method: "POST" });
@@ -57,6 +80,10 @@ export function NotificationItem({ notification }: { notification: InAppNotifica
       <Card className="p-3">
         {notification.eventId ? (
           <Link href={`/events/${notification.eventId}`} className="block">
+            {body}
+          </Link>
+        ) : groupHref ? (
+          <Link href={groupHref} className="block">
             {body}
           </Link>
         ) : (

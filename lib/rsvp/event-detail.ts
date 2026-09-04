@@ -40,6 +40,12 @@ export interface EventDetail {
   // group admin here must not see them, and vice versa (policy.md#6).
   viewerRole: "member" | "admin";
   comments: EventCommentItem[];
+  // Present only when this instance belongs to a series and the viewer is
+  // an admin — drives the series-level cancel actions on the event page
+  // (lib/events/series.ts#cancelSeriesWeekday / #cancelSeries). `weekdays`
+  // is the series' current set, so a weekday already dropped by a prior
+  // per-weekday cancel doesn't show a stale button.
+  series: { id: string; weekdays: number[] } | null;
 }
 
 export async function getEventDetail(eventId: string, viewer: { id: string }): Promise<EventDetail | null> {
@@ -138,6 +144,11 @@ export async function getEventDetail(eventId: string, viewer: { id: string }): P
 
   const comments = await listComments(eventId);
 
+  const series =
+    viewerRole === "admin" && event.seriesId
+      ? await prisma.eventSeries.findUnique({ where: { id: event.seriesId }, select: { id: true, weekdays: true } })
+      : null;
+
   return {
     event: serializeEvent(event, viewerRole),
     group: { id: event.group.id, name: event.group.name },
@@ -147,6 +158,7 @@ export async function getEventDetail(eventId: string, viewer: { id: string }): P
     yourRsvp,
     viewerRole,
     comments,
+    series,
   };
 }
 

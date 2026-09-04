@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input, Textarea, Select } from "@/components/ui/inputs";
 import { ErrorText } from "@/components/ui/text";
 import { US_TIMEZONES } from "@/lib/us-timezones";
+import { autofillMapsLinksOnBlur } from "@/lib/maps-links";
+import { looksLikeAddress, EXACT_LOCATION_HINT } from "@/lib/events/exact-location";
 
 const WEEKDAYS = [
   { value: 0, label: "Sun" },
@@ -30,7 +32,7 @@ function todayDateString(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-export function CreateSeriesForm({ groupId }: { groupId: string }) {
+export function CreateSeriesForm({ groupId, onSuccess }: { groupId: string; onSuccess?: () => void }) {
   const router = useRouter();
   const [weekdays, setWeekdays] = useState<number[]>([]);
   const [signupOpensRule, setSignupOpensRule] = useState<"immediately" | "days_before">("immediately");
@@ -56,6 +58,13 @@ export function CreateSeriesForm({ groupId }: { groupId: string }) {
     const maxGuestsRaw = form.get("maxGuestsPerRsvp") as string;
     const daysBeforeRaw = form.get("signupOpensDaysBefore") as string;
     const revealHoursRaw = form.get("locationRevealHours") as string;
+    const exactLocation = form.get("exactLocation") as string;
+
+    if (!looksLikeAddress(exactLocation)) {
+      setError(EXACT_LOCATION_HINT);
+      setLoading(false);
+      return;
+    }
 
     const body = {
       groupId,
@@ -73,7 +82,7 @@ export function CreateSeriesForm({ groupId }: { groupId: string }) {
       maxGuestsPerRsvp: maxGuestsRaw ? Number(maxGuestsRaw) : null,
       waiverRequired: form.get("waiverRequired") === "on",
       generalLocation: (form.get("generalLocation") as string) || null,
-      exactLocation: (form.get("exactLocation") as string) || null,
+      exactLocation,
       googleMapsUrl: (form.get("googleMapsUrl") as string) || null,
       appleMapsUrl: (form.get("appleMapsUrl") as string) || null,
       locationRevealPolicy: form.get("locationRevealPolicy"),
@@ -91,7 +100,10 @@ export function CreateSeriesForm({ groupId }: { groupId: string }) {
         setError(responseBody.error ?? "Failed to create series.");
         return;
       }
-      router.push(`/admin/groups/${groupId}/series/${responseBody.series.id}`);
+      // No separate series page — the calendar itself shows the newly
+      // materialized instances immediately.
+      router.refresh();
+      onSuccess?.();
     } finally {
       setLoading(false);
     }
@@ -171,7 +183,12 @@ export function CreateSeriesForm({ groupId }: { groupId: string }) {
       <div className={sectionClass}>
         <h3 className={sectionHeaderClass}>Location</h3>
         <Input name="generalLocation" placeholder="General location" />
-        <Input name="exactLocation" placeholder="Exact location" />
+        <Input
+          name="exactLocation"
+          placeholder='Exact location — a real address (e.g. "123 Main St, Springfield")'
+          required
+          onBlur={autofillMapsLinksOnBlur}
+        />
         <Input name="googleMapsUrl" type="url" placeholder="Google Maps link (optional)" />
         <Input name="appleMapsUrl" type="url" placeholder="Apple Maps link (optional)" />
         <Select name="locationRevealPolicy" defaultValue="always">

@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { normalizeUsPhone } from "@/lib/auth/otp";
+import { enqueueNotification, dispatchNotification } from "@/lib/notifications/notifications";
+import { getAdminGroupIds } from "@/lib/groups/authz";
 import {
   GroupNotFoundError,
   GroupWaiverNotConfiguredError,
@@ -107,6 +109,28 @@ export async function getActiveMemberCounts(groupIds: string[]): Promise<Map<str
     _count: { _all: true },
   });
   return new Map(counts.map((c) => [c.groupId, c._count._all]));
+}
+
+export async function getPendingMembershipCounts(groupIds: string[]): Promise<Map<string, number>> {
+  const counts = await prisma.groupMembership.groupBy({
+    by: ["groupId"],
+    where: { groupId: { in: groupIds }, status: "pending" },
+    _count: { _all: true },
+  });
+  return new Map(counts.map((c) => [c.groupId, c._count._all]));
+}
+
+// Nav-badge total (docs/policy.md#6's per-group admin boundary): a platform
+// admin sees every group's queue, since their control is system-wide with
+// no membership rows of their own to scope by; a real group admin sees only
+// the groups they actually administer (getAdminGroupIds).
+export async function getPendingMembershipCountForAdmin(userId: string, isPlatformAdmin: boolean): Promise<number> {
+  if (isPlatformAdmin) {
+    return prisma.groupMembership.count({ where: { status: "pending" } });
+  }
+  const groupIds = await getAdminGroupIds(userId);
+  if (groupIds.length === 0) return 0;
+  return prisma.groupMembership.count({ where: { groupId: { in: groupIds }, status: "pending" } });
 }
 
 async function assertUnderMemberLimit(group: Group): Promise<void> {
@@ -269,20 +293,47 @@ export async function approveMembership(groupId: string, userId: string): Promis
   await findMembershipOrThrow(groupId, userId);
   const group = await getGroupOrThrow(groupId);
   await assertUnderMemberLimit(group);
-  return prisma.groupMembership.update({
-    where: { groupId_userId: { groupId, userId } },
-    data: { status: "active" },
+  let notificationId = "";
+  const membership = await prisma.$transaction(async (tx) => {
+    const membership = await tx.groupMembership.update({
+      where: { groupId_userId: { groupId, userId } },
+      data: { status: "active" },
+    });
+    const notification = await enqueueNotification(tx, {
+      userId,
+      eventId: null,
+      type: "group_membership_approved",
+      payload: { groupId, groupName: group.name },
+    });
+    notificationId = notification.id;
+    return membership;
   });
+  await dispatchNotification(notificationId);
+  return membership;
 }
 
 // A rejected membership can be resubmitted via joinGroupByCode — this is
 // not a permanent ban (policy.md#6's join-flow rule).
 export async function rejectMembership(groupId: string, userId: string): Promise<GroupMembership> {
   await findMembershipOrThrow(groupId, userId);
-  return prisma.groupMembership.update({
-    where: { groupId_userId: { groupId, userId } },
-    data: { status: "rejected" },
+  const group = await getGroupOrThrow(groupId);
+  let notificationId = "";
+  const membership = await prisma.$transaction(async (tx) => {
+    const membership = await tx.groupMembership.update({
+      where: { groupId_userId: { groupId, userId } },
+      data: { status: "rejected" },
+    });
+    const notification = await enqueueNotification(tx, {
+      userId,
+      eventId: null,
+      type: "group_membership_rejected",
+      payload: { groupId, groupName: group.name },
+    });
+    notificationId = notification.id;
+    return membership;
   });
+  await dispatchNotification(notificationId);
+  return membership;
 }
 
 // Promote/demote an *active* member's role within one group. Pending/
@@ -356,10 +407,20 @@ export async function getGroupWaiverStatus(
   return { waiverContent: group.waiverContent, waiverVersion: group.waiverVersion, accepted };
 }
 
+// Shared with event/series creation and updates (lib/events/events.ts,
+// lib/events/series.ts) — `waiverRequired` can't be set true on an
+// event/series whose group has nothing configured to gate on
+// (architecture.md), same rule this waiver-acceptance path already enforced.
+export function assertGroupWaiverConfigured(
+  group: Pick<Group, "waiverVersion">,
+): asserts group is Pick<Group, "waiverVersion"> & { waiverVersion: number } {
+  if (group.waiverVersion === null) throw new GroupWaiverNotConfiguredError();
+}
+
 export async function acceptGroupWaiver(groupId: string, userId: string, ip: string): Promise<void> {
   const group = await getGroupOrThrow(groupId);
   await findActiveMembershipOrThrow(groupId, userId);
-  if (group.waiverVersion === null) throw new GroupWaiverNotConfiguredError();
+  assertGroupWaiverConfigured(group);
 
   const signedAt = new Date();
   await prisma.$transaction([

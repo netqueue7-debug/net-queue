@@ -12,7 +12,6 @@ import {
   listPendingGuestsForGroup,
 } from "@/lib/guests/guests";
 import { GuestCapExceededError } from "@/lib/guests/errors";
-import { WAIVER_VERSION } from "@/lib/waivers/content";
 import { addActiveMembership, createTestGroup, deleteTestGroup } from "./helpers/test-group";
 import { GET as getWaiverRoute } from "@/app/api/waiver/[token]/route";
 import { POST as signWaiverRoute } from "@/app/api/waiver/[token]/sign/route";
@@ -45,7 +44,7 @@ describe("guests", () => {
 
   beforeAll(async () => {
     const admin = await prisma.user.create({
-      data: { phone: adminPhone, role: "admin", waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone: adminPhone, role: "admin" },
     });
     adminId = admin.id;
     groupId = (await createTestGroup(adminId, "Guests Test Group")).id;
@@ -93,7 +92,7 @@ describe("guests", () => {
     memberCounter += 1;
     const phone = `+15555550810${String(memberCounter).padStart(2, "0")}`;
     const user = await prisma.user.create({
-      data: { phone, waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone },
     });
     await addActiveMembership(groupId, user.id);
     return user;
@@ -277,6 +276,55 @@ describe("guests", () => {
     const signedGuest = await prisma.guest.findUniqueOrThrow({ where: { id: guest.id } });
     expect(signedGuest.name).toBe("Real Guest Name");
     expect(signedGuest.waiverSignedAt).not.toBeNull();
+  });
+
+  it("guest waiver uses the event's group's waiver when configured, and shows/records nothing when the group has none", async () => {
+    const eventNoGroupWaiver = await makeEvent({ capacity: 10 });
+    const hostA = await makeMember();
+    await createRsvp(eventNoGroupWaiver.id, hostA.id);
+    const [guestNoGroupWaiver] = await addGuests(eventNoGroupWaiver.id, hostA.id, [null]);
+
+    const noWaiverRes = await getWaiverRoute(req(`http://localhost/api/waiver/${guestNoGroupWaiver.waiverToken}`), {
+      params: Promise.resolve({ token: guestNoGroupWaiver.waiverToken }),
+    });
+    const noWaiverBody = await noWaiverRes.json();
+    expect(noWaiverBody.waiverContent).toBeNull();
+
+    await signWaiverRoute(
+      req(`http://localhost/api/waiver/${guestNoGroupWaiver.waiverToken}/sign`, { method: "POST", body: { name: "No Waiver Guest" } }),
+      { params: Promise.resolve({ token: guestNoGroupWaiver.waiverToken }) },
+    );
+    // Name still gets recorded even with nothing to sign — only the
+    // WaiverSignature audit row is skipped.
+    const noWaiverGuest = await prisma.guest.findUniqueOrThrow({ where: { id: guestNoGroupWaiver.id } });
+    expect(noWaiverGuest.name).toBe("No Waiver Guest");
+    expect(noWaiverGuest.waiverSignedAt).not.toBeNull();
+    const noWaiverSignature = await prisma.waiverSignature.findFirst({ where: { guestId: guestNoGroupWaiver.id } });
+    expect(noWaiverSignature).toBeNull();
+
+    await prisma.group.update({ where: { id: groupId }, data: { waiverContent: "Group-specific waiver text.", waiverVersion: 3 } });
+    try {
+      const eventWithGroupWaiver = await makeEvent({ capacity: 10 });
+      const hostB = await makeMember();
+      await createRsvp(eventWithGroupWaiver.id, hostB.id);
+      const [guestWithGroupWaiver] = await addGuests(eventWithGroupWaiver.id, hostB.id, [null]);
+
+      const groupRes = await getWaiverRoute(req(`http://localhost/api/waiver/${guestWithGroupWaiver.waiverToken}`), {
+        params: Promise.resolve({ token: guestWithGroupWaiver.waiverToken }),
+      });
+      const groupBody = await groupRes.json();
+      expect(groupBody.waiverContent).toBe("Group-specific waiver text.");
+
+      await signWaiverRoute(
+        req(`http://localhost/api/waiver/${guestWithGroupWaiver.waiverToken}/sign`, { method: "POST", body: { name: "Group Waiver Guest" } }),
+        { params: Promise.resolve({ token: guestWithGroupWaiver.waiverToken }) },
+      );
+      const groupSignature = await prisma.waiverSignature.findFirstOrThrow({ where: { guestId: guestWithGroupWaiver.id } });
+      expect(groupSignature.groupId).toBe(groupId);
+      expect(groupSignature.waiverVersion).toBe(3);
+    } finally {
+      await prisma.group.update({ where: { id: groupId }, data: { waiverContent: null, waiverVersion: null } });
+    }
   });
 
   it("an invalid waiver token 404s on both GET and sign", async () => {

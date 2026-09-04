@@ -11,7 +11,6 @@ config({ path: ".env.local" });
 async function main() {
   const { prisma } = await import("../../lib/db");
   const { createSession } = await import("../../lib/auth/session");
-  const { WAIVER_VERSION } = await import("../../lib/waivers/content");
 
   const groupAdminPhone = "+15555550410";
   const memberOpenPhone = "+15555550411";
@@ -24,8 +23,6 @@ async function main() {
     create: {
       phone: groupAdminPhone,
       displayName: "E2E Group Admin",
-      waiverVersion: WAIVER_VERSION,
-      waiverAcceptedAt: new Date(),
     },
   });
   const memberOpen = await prisma.user.upsert({
@@ -34,8 +31,6 @@ async function main() {
     create: {
       phone: memberOpenPhone,
       displayName: "E2E Open Joiner",
-      waiverVersion: WAIVER_VERSION,
-      waiverAcceptedAt: new Date(),
     },
   });
   const memberApproval = await prisma.user.upsert({
@@ -44,8 +39,6 @@ async function main() {
     create: {
       phone: memberApprovalPhone,
       displayName: "E2E Approval Joiner",
-      waiverVersion: WAIVER_VERSION,
-      waiverAcceptedAt: new Date(),
     },
   });
   // Deliberately not onboarded (no displayName, no waiver) — used to prove

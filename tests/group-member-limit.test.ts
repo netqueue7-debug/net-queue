@@ -56,6 +56,7 @@ describe("group member limit", () => {
     const allIds = users.map((u) => u.id);
     const groups = await prisma.group.findMany({ where: { createdBy: { in: allIds } } });
     for (const g of groups) await deleteTestGroup(g.id);
+    await prisma.notification.deleteMany({ where: { userId: { in: allIds } } });
     await prisma.user.deleteMany({ where: { id: { in: allIds } } });
   });
 

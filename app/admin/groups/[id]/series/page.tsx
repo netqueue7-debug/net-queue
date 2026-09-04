@@ -9,6 +9,8 @@ import { CreateSeriesForm } from "./create-series-form";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 
+const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
 export default async function GroupSeriesPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await getSession();
   if (!user) redirect("/login");
@@ -31,21 +33,33 @@ export default async function GroupSeriesPage({ params }: { params: Promise<{ id
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 p-4 sm:p-8">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-semibold">{group.name}: Recurring series</h1>
-        <Link href={`/admin/groups/${id}/events`} className="text-sm underline">
-          Events
-        </Link>
+        <div className="flex gap-3 text-sm">
+          <Link href={`/groups/${id}/calendar`} className="underline">
+            Calendar
+          </Link>
+          <Link href={`/admin/groups/${id}/events`} className="underline">
+            Events
+          </Link>
+        </div>
       </div>
 
       {series.length === 0 && <EmptyState>No recurring series yet.</EmptyState>}
+
+      {series.length > 0 && (
+        <p className="text-xs text-muted">
+          Instances of each series show up directly on the calendar — open any instance there to edit or cancel it, cancel a
+          whole weekday, or cancel the rest of the series.
+        </p>
+      )}
 
       <ul className="flex flex-col gap-2">
         {series.map((s) => (
           <li key={s.id}>
             <Card className="p-3">
-              <Link href={`/admin/groups/${id}/series/${s.id}`} className="font-medium underline">
-                {s.title}
-              </Link>
-              <span className="ml-2 text-sm text-muted">until {new Date(s.recurUntil).toLocaleDateString()}</span>
+              <span className="font-medium">{s.title}</span>
+              <span className="ml-2 text-sm text-muted">
+                {s.weekdays.map((d) => WEEKDAY_NAMES[d]).join(", ")} · until {new Date(s.recurUntil).toLocaleDateString()}
+              </span>
             </Card>
           </li>
         ))}

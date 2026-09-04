@@ -7,9 +7,7 @@ import {
   RsvpNotFoundError,
   SignupNotOpenError,
   UserBannedError,
-  WaiverNotAcceptedError,
 } from "./errors";
-import { WAIVER_VERSION } from "@/lib/waivers/content";
 import type { Rsvp } from "@/lib/generated/prisma/client";
 
 // All validation happens inside withEventLock's transaction, per
@@ -33,10 +31,10 @@ export function createRsvp(eventId: string, userId: string): Promise<Rsvp> {
 
     const user = await tx.user.findUniqueOrThrow({ where: { id: userId } });
     if (user.bannedAt) throw new UserBannedError();
-    if (user.waiverVersion !== WAIVER_VERSION) throw new WaiverNotAcceptedError();
 
-    // The group's own waiver, on top of the platform one above — only
-    // gates when this event/series opted in (policy.md#6).
+    // The group's own waiver — only gates when this event/series opted in
+    // (policy.md#6). This is the only waiver tier now (the platform waiver
+    // was removed 2026-09-03).
     if (event.waiverRequired) {
       const group = await tx.group.findUniqueOrThrow({ where: { id: event.groupId } });
       if (group.waiverVersion === null || membership.groupWaiverVersionAccepted !== group.waiverVersion) {

@@ -60,6 +60,16 @@ enum GroupMembershipRole {
   admin
 }
 
+enum FeedbackType {
+  bug
+  feedback
+}
+
+enum FeedbackStatus {
+  open
+  resolved
+}
+
 // `rejected` exists from the start (not added later) so a group admin's
 // reject action and a user's resubmit-after-reject retry both have a real
 // state to land in — see docs/phase-0b-groups.md's join-flow task.
@@ -67,6 +77,12 @@ enum GroupMembershipStatus {
   active
   pending
   rejected
+}
+
+enum GroupUpgradeRequestStatus {
+  pending
+  approved
+  denied
 }
 
 enum GuestAddedByRole {
@@ -94,12 +110,17 @@ enum NotificationType {
   event_canceled
   guest_approved
   guest_rejected
+  group_membership_approved
+  group_membership_rejected
+  group_upgrade_requested
+  group_upgrade_resolved
   capacity_changed
   waiver_reminder
   location_reveal
   day_before_reminder
   event_comment_posted
   event_updated
+  signup_opened
 }
 
 enum NotificationChannel {
@@ -123,8 +144,6 @@ model User {
   displayName      String?   @map("display_name")
   avatarUrl        String?   @map("avatar_url")
   role             Role      @default(member)
-  waiverAcceptedAt DateTime? @map("waiver_accepted_at")
-  waiverVersion    Int?      @map("waiver_version")
   bannedAt         DateTime? @map("banned_at")
   createdAt        DateTime  @default(now()) @map("created_at")
 
@@ -137,10 +156,51 @@ model User {
   approvedGuests   Guest[]
   createdGroups    Group[]
   groupMemberships GroupMembership[]
-  notifications    Notification[]
-  eventComments    EventComment[]
+  notifications     Notification[]
+  eventComments     EventComment[]
+  pushSubscriptions PushSubscription[]
+  feedback          Feedback[]
+  upgradeRequestsMade     GroupUpgradeRequest[] @relation("GroupUpgradeRequester")
+  upgradeRequestsResolved GroupUpgradeRequest[] @relation("GroupUpgradeResolver")
 
   @@map("users")
+}
+
+// Bug reports and general feedback about the app itself — not group-scoped
+// (it's about the product, not a specific group's events), so triage is
+// platform-admin only rather than fitting the per-group admin model (see
+// docs/architecture.md#groups--tenancy).
+model Feedback {
+  id         String         @id @default(cuid())
+  userId     String         @map("user_id")
+  type       FeedbackType
+  body       String
+  status     FeedbackStatus @default(open)
+  createdAt  DateTime       @default(now()) @map("created_at")
+  resolvedAt DateTime?      @map("resolved_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([status, createdAt])
+  @@map("feedback")
+}
+
+// One row per browser/device the user has opted into push on — a user can
+// have several (phone, laptop, ...), each with its own endpoint. Deleted on
+// unsubscribe or the moment a push send comes back 404/410 (the browser has
+// invalidated it), never left to accumulate dead rows.
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("push_subscriptions")
 }
 
 // The tenant boundary — see architecture.md#groups--tenancy. Not publicly
@@ -172,8 +232,37 @@ model Group {
   events           Event[]
   eventSeries      EventSeries[]
   waiverSignatures WaiverSignature[]
+  upgradeRequests  GroupUpgradeRequest[]
 
   @@map("groups")
+}
+
+// A group admin's ask to raise `Group.memberLimit` — no payment processing
+// here, just a tracked request/response so "contact a platform admin" (the
+// only path before this) becomes a real queue instead of an out-of-band
+// text/email. `requestedLimit` is nullable: an admin may not know exactly
+// what they need and just wants to start a conversation. Approving doesn't
+// require using `requestedLimit` verbatim — see
+// lib/groups/upgrade-requests.ts#resolveUpgradeRequest, which takes the
+// platform admin's own chosen `newLimit`.
+model GroupUpgradeRequest {
+  id             String                    @id @default(cuid())
+  groupId        String                    @map("group_id")
+  requestedBy    String                    @map("requested_by")
+  requestedLimit Int?                      @map("requested_limit")
+  message        String?
+  status         GroupUpgradeRequestStatus @default(pending)
+  createdAt      DateTime                  @default(now()) @map("created_at")
+  resolvedAt     DateTime?                 @map("resolved_at")
+  resolvedBy     String?                   @map("resolved_by")
+
+  group     Group @relation(fields: [groupId], references: [id])
+  requester User  @relation("GroupUpgradeRequester", fields: [requestedBy], references: [id])
+  resolver  User? @relation("GroupUpgradeResolver", fields: [resolvedBy], references: [id])
+
+  @@index([groupId, status])
+  @@index([status, createdAt])
+  @@map("group_upgrade_requests")
 }
 
 // One row per (group, user). This is where per-group admin-ness and the
@@ -216,9 +305,11 @@ model Session {
   @@map("sessions")
 }
 
-// `groupId` is null for a platform-waiver signature (Phase 0's original
-// rows, and any future platform-waiver acceptance) and set for a
-// group-waiver signature (Phase 0b) — two independent waivers, one table.
+// `groupId` is null on legacy rows from Phase 0's platform waiver (removed
+// 2026-09-03 — see docs/policy.md) and is otherwise always set: every
+// signature recorded going forward is a group waiver acceptance, by a
+// member or a guest. Old null-groupId rows are kept as historical record,
+// not backfilled or deleted.
 // `guestId` is a real FK now that `guests` exists (Phase 2) — Phase 0's
 // original rows all have `signerType: user` and `guestId: null`, unaffected.
 model WaiverSignature {

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getGuestByWaiverToken } from "@/lib/guests/guests";
-import { WAIVER_MARKDOWN } from "@/lib/waivers/content";
 
 type RouteContext = { params: Promise<{ token: string }> };
 
@@ -11,5 +10,5 @@ export async function GET(_request: NextRequest, { params }: RouteContext) {
   const guest = await getGuestByWaiverToken(token);
   if (!guest) return NextResponse.json({ error: "Invalid waiver link." }, { status: 404 });
 
-  return NextResponse.json({ ...guest, waiverContent: WAIVER_MARKDOWN });
+  return NextResponse.json(guest);
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { requireMember, ForbiddenError, UnauthorizedError } from "@/lib/auth/session";
 import { assertGroupAdmin } from "@/lib/groups/authz";
+import { GroupWaiverNotConfiguredError } from "@/lib/groups/errors";
 import { prisma } from "@/lib/db";
 import { updateEventSchema } from "@/lib/events/schema";
 import { cancelEvent, updateEvent } from "@/lib/events/events";
@@ -59,10 +60,15 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   }
 
   try {
-    const event = await updateEvent(id, parsed.data, admin.id);
+    // A single-occurrence edit is always a hand-edit — mark it overridden
+    // so a later series-wide edit skips it (docs/phase-2-recurrence-guests.md's
+    // "this event vs. all following" model). Harmless on a standalone,
+    // non-series event: overridden is never read there.
+    const event = await updateEvent(id, parsed.data, admin.id, { markOverridden: true });
     return NextResponse.json({ event });
   } catch (e) {
     if (isNotFoundError(e)) return NextResponse.json({ error: "Event not found." }, { status: 404 });
+    if (e instanceof GroupWaiverNotConfiguredError) return NextResponse.json({ error: e.message }, { status: 400 });
     throw e;
   }
 }

@@ -142,27 +142,39 @@ export default async function MemberHomePage() {
         )}
 
         <ul className="flex flex-col gap-3">
-          {memberships.slice(0, GROUPS_LIMIT).map((m) => (
-            <li key={m.group.id}>
-              <Card>
-                <GroupCardHeader
-                  name={m.group.name}
-                  imageUrl={m.group.imageUrl}
-                  size="sm"
-                  badge={
-                    <Badge tone={m.status === "pending" ? "warning" : m.role === "admin" ? "info" : "neutral"}>
-                      {m.status === "pending" ? "Pending" : m.role === "admin" ? "Admin" : "Member"}
-                    </Badge>
-                  }
-                />
-                {m.status === "active" && !m.waiverUpToDate && (
-                  <Link href={`/groups/${m.group.id}/waiver`} className="mt-2 inline-block text-sm text-danger underline">
-                    Outstanding waiver
-                  </Link>
-                )}
-              </Card>
-            </li>
-          ))}
+          {memberships.slice(0, GROUPS_LIMIT).map((m) => {
+            const header = (
+              <GroupCardHeader
+                name={m.group.name}
+                imageUrl={m.group.imageUrl}
+                size="sm"
+                badge={
+                  <Badge tone={m.status === "pending" ? "warning" : m.role === "admin" ? "info" : "neutral"}>
+                    {m.status === "pending" ? "Pending" : m.role === "admin" ? "Admin" : "Member"}
+                  </Badge>
+                }
+              />
+            );
+
+            return (
+              <li key={m.group.id}>
+                <Card className={m.status === "active" ? "transition-shadow hover:shadow-md" : undefined}>
+                  {m.status === "active" ? (
+                    <Link href={`/groups/${m.group.id}/calendar?from=home`} className="block">
+                      {header}
+                    </Link>
+                  ) : (
+                    header
+                  )}
+                  {m.status === "active" && !m.waiverUpToDate && (
+                    <Link href={`/groups/${m.group.id}/waiver`} className="mt-2 inline-block text-sm text-danger underline">
+                      Outstanding waiver
+                    </Link>
+                  )}
+                </Card>
+              </li>
+            );
+          })}
         </ul>
       </section>
 

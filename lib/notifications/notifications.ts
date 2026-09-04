@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { sendSms, SmsSendError } from "./sms";
+import { sendPushToUser, type PushPayload } from "./push";
 import type { Notification, NotificationType, NotificationChannel, Prisma } from "@/lib/generated/prisma/client";
 
 // The SMS "moments that matter" — kept short to control Twilio cost
@@ -78,6 +79,64 @@ function renderSmsBody(type: NotificationType, payload: any): string {
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function renderPushPayload(type: NotificationType, payload: any, eventId: string | null): PushPayload {
+  const url = eventId
+    ? `/events/${eventId}`
+    : type === "group_membership_approved"
+      ? `/groups/${payload.groupId}/calendar`
+      : type === "group_upgrade_resolved"
+        ? `/groups/${payload.groupId}/about`
+        : "/notifications";
+
+  switch (type) {
+    case "guest_approved":
+      return { title: "Guest approved", body: `${payload.guestName ?? "Your guest"} was approved.`, url };
+    case "guest_rejected":
+      return { title: "Guest not approved", body: `${payload.guestName ?? "Your guest"} was not approved.`, url };
+    case "group_membership_approved":
+      return { title: "Group request approved", body: `You were approved to join ${payload.groupName ?? "a group"}.`, url };
+    case "group_membership_rejected":
+      return { title: "Group request declined", body: `Your request to join ${payload.groupName ?? "a group"} was not approved.`, url };
+    case "group_upgrade_requested":
+      return {
+        title: "Member limit increase requested",
+        body: `${payload.groupName ?? "A group"} is asking to raise its member limit${payload.requestedLimit ? ` to ${payload.requestedLimit}` : ""}.`,
+        url: "/admin/group-upgrade-requests",
+      };
+    case "group_upgrade_resolved":
+      return {
+        title: payload.decision === "approved" ? "Member limit increased" : "Upgrade request declined",
+        body:
+          payload.decision === "approved"
+            ? `${payload.groupName ?? "Your group"}'s member limit was raised${payload.newLimit ? ` to ${payload.newLimit}` : ""}.`
+            : `The request to raise ${payload.groupName ?? "your group"}'s member limit was declined.`,
+        url,
+      };
+    case "capacity_changed":
+      return {
+        title: "Capacity changed",
+        body: `Capacity for ${payload.eventTitle} changed from ${payload.from ?? "unlimited"} to ${payload.to ?? "unlimited"}.`,
+        url,
+      };
+    case "waiver_reminder":
+      return { title: "Waiver reminder", body: `Sign the waiver for ${payload.eventTitle} before it starts.`, url };
+    case "location_reveal":
+      return { title: "Location revealed", body: `Location revealed for ${payload.eventTitle}.`, url };
+    case "day_before_reminder":
+      return { title: "Reminder", body: `${payload.eventTitle} is tomorrow.`, url };
+    case "event_comment_posted": {
+      const text = String(payload.commentBody ?? "");
+      const preview = text.length > 80 ? `${text.slice(0, 80)}…` : text;
+      return { title: `New update on ${payload.eventTitle}`, body: preview, url };
+    }
+    case "signup_opened":
+      return { title: "RSVPs are open", body: `RSVPs are now open for ${payload.eventTitle}.`, url };
+    default:
+      return { title: "Notification", body: String(payload.message ?? type), url };
+  }
+}
+
 // Best-effort, after-commit dispatch for one already-created row. Never
 // throws — a send failure is recorded on the row (attempts, lastError,
 // status back to `pending` for a later retry sweep, or `failed` once
@@ -88,9 +147,21 @@ export async function dispatchNotification(notificationId: string): Promise<void
     where: { id: notificationId },
     include: { user: { select: { phone: true } } },
   });
+  if (!notification) return;
+
+  // In-app rows are already stamped `sent` the instant they're created —
+  // the row *is* the notification (architecture.md#notifications). Pushing
+  // it to a subscribed browser is a separate, independent, best-effort
+  // mirror of that same row: it never touches `status`/`attempts`/
+  // `lastError`, which stay reserved for SMS delivery-retry tracking below.
+  if (notification.channel === "in_app") {
+    await sendPushToUser(notification.userId, renderPushPayload(notification.type, notification.payload, notification.eventId));
+    return;
+  }
+
   // Already sent (or the row vanished) — dispatching again must be a no-op,
   // which is what makes "a retry never double-texts" true by construction.
-  if (!notification || notification.status === "sent") return;
+  if (notification.status === "sent") return;
 
   try {
     if (notification.channel === "sms") {

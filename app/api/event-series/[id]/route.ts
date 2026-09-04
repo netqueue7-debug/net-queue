@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireMember, UnauthorizedError, ForbiddenError } from "@/lib/auth/session";
 import { assertGroupAdmin } from "@/lib/groups/authz";
+import { GroupWaiverNotConfiguredError } from "@/lib/groups/errors";
 import { updateSeriesSchema } from "@/lib/events/series-schema";
 import { cancelSeries, getSeries, updateSeries } from "@/lib/events/series";
 
@@ -56,8 +57,13 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     throw e;
   }
 
-  const { series, updatedCount } = await updateSeries(id, parsed.data, admin.id);
-  return NextResponse.json({ series, updatedCount });
+  try {
+    const { series, updatedCount } = await updateSeries(id, parsed.data, admin.id);
+    return NextResponse.json({ series, updatedCount });
+  } catch (e) {
+    if (e instanceof GroupWaiverNotConfiguredError) return NextResponse.json({ error: e.message }, { status: 400 });
+    throw e;
+  }
 }
 
 // Cancels every future instance (overridden or not) — see

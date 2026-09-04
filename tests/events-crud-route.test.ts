@@ -21,6 +21,7 @@ const baseEventBody = {
   timezone: "America/New_York",
   signupOpensAt: new Date().toISOString(),
   locationRevealPolicy: "always",
+  exactLocation: "123 Main St",
 };
 
 describe("admin single-event CRUD", () => {
@@ -81,6 +82,42 @@ describe("admin single-event CRUD", () => {
     expect(body.events.some((e: { id: string }) => e.id === eventId)).toBe(true);
   });
 
+  it("GET /api/events excludes events that have already ended, even a currently-in-progress one", async () => {
+    const now = Date.now();
+    const adminUserId = (await prisma.user.findUniqueOrThrow({ where: { phone: adminPhone } })).id;
+    const past = await prisma.event.create({
+      data: {
+        ...validEventBody,
+        title: "Already Over",
+        startsAt: new Date(now - 4 * 60 * 60 * 1000),
+        endsAt: new Date(now - 2 * 60 * 60 * 1000),
+        locationRevealPolicy: "always" as const,
+        createdBy: adminUserId,
+      },
+    });
+    const inProgress = await prisma.event.create({
+      data: {
+        ...validEventBody,
+        title: "Happening Now",
+        startsAt: new Date(now - 60 * 60 * 1000),
+        endsAt: new Date(now + 60 * 60 * 1000),
+        locationRevealPolicy: "always" as const,
+        createdBy: adminUserId,
+      },
+    });
+
+    try {
+      const res = await listRoute(req("http://localhost/api/events", { token: memberToken }));
+      const body = await res.json();
+      const ids = body.events.map((e: { id: string }) => e.id);
+      expect(ids).not.toContain(past.id);
+      // Started but not yet ended still counts as current, not "passed".
+      expect(ids).toContain(inProgress.id);
+    } finally {
+      await prisma.event.deleteMany({ where: { id: { in: [past.id, inProgress.id] } } });
+    }
+  });
+
   it("a member can list and view events (read access is member-facing; write is admin-only)", async () => {
     const listRes = await listRoute(req("http://localhost/api/events", { token: memberToken }));
     expect(listRes.status).toBe(200);
@@ -123,5 +160,41 @@ describe("admin single-event CRUD", () => {
     const stillThere = await prisma.event.findUnique({ where: { id: eventId } });
     expect(stillThere).not.toBeNull();
     expect(stillThere?.status).toBe("canceled");
+  });
+
+  it("admin cannot set waiverRequired true on create when the group has no waiver configured", async () => {
+    const res = await createRoute(
+      req("http://localhost/api/events", { method: "POST", body: { ...validEventBody, waiverRequired: true }, token: adminToken }),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/no waiver configured/i);
+  });
+
+  it("admin can set waiverRequired true once the group has a waiver configured, and can't set it via PATCH once the waiver is cleared again", async () => {
+    await prisma.group.update({ where: { id: groupId }, data: { waiverContent: "Sign here.", waiverVersion: 1 } });
+    try {
+      const createRes = await createRoute(
+        req("http://localhost/api/events", { method: "POST", body: { ...validEventBody, waiverRequired: true }, token: adminToken }),
+      );
+      expect(createRes.status).toBe(201);
+      const created = (await createRes.json()).event;
+      expect(created.waiverRequired).toBe(true);
+
+      // Clear the group's waiver, then confirm a PATCH can't flip
+      // waiverRequired to true on a different (currently-false) event either.
+      await prisma.group.update({ where: { id: groupId }, data: { waiverContent: null, waiverVersion: null } });
+      const otherRes = await createRoute(req("http://localhost/api/events", { method: "POST", body: validEventBody, token: adminToken }));
+      const other = (await otherRes.json()).event;
+      const patchRes = await patchRoute(
+        req(`http://localhost/api/events/${other.id}`, { method: "PATCH", body: { waiverRequired: true }, token: adminToken }),
+        { params: Promise.resolve({ id: other.id }) },
+      );
+      expect(patchRes.status).toBe(400);
+
+      await prisma.event.deleteMany({ where: { id: { in: [created.id, other.id] } } });
+    } finally {
+      await prisma.group.update({ where: { id: groupId }, data: { waiverContent: null, waiverVersion: null } });
+    }
   });
 });

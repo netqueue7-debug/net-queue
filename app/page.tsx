@@ -38,7 +38,7 @@ export default async function RootPage() {
           <div className="flex flex-col items-center gap-3">
             <Link
               href="/login"
-              className="inline-flex items-center justify-center rounded-full bg-foreground px-6 py-3 text-base font-medium text-background hover:opacity-90"
+              className="inline-flex items-center justify-center rounded-full bg-accent px-6 py-3 text-base font-medium text-accent-foreground hover:opacity-90"
             >
               Get started
             </Link>

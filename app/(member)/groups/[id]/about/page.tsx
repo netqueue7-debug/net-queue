@@ -5,6 +5,7 @@ import { getSession } from "@/lib/auth/session";
 import { needsOnboarding } from "@/lib/auth/onboarding";
 import { resolveGroupMembership } from "@/lib/groups/authz";
 import { getGroupOrThrow, listPublicMembers, getActiveMemberCount } from "@/lib/groups/groups";
+import { getPendingUpgradeRequestForGroup } from "@/lib/groups/upgrade-requests";
 import { GroupNotFoundError } from "@/lib/groups/errors";
 import { Card } from "@/components/ui/card";
 import { Linkify } from "@/components/ui/linkify";
@@ -40,6 +41,8 @@ export default async function GroupAboutPage({ params }: { params: Promise<{ id:
   const origin = host ? `${proto}://${host}` : "";
 
   const activeMemberCount = membership.role === "admin" ? await getActiveMemberCount(id) : 0;
+  const atCapacity = membership.role === "admin" && group.memberLimit !== null && activeMemberCount >= group.memberLimit;
+  const pendingUpgradeRequest = atCapacity ? await getPendingUpgradeRequestForGroup(id) : null;
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 p-4 sm:p-8">
@@ -79,6 +82,7 @@ export default async function GroupAboutPage({ params }: { params: Promise<{ id:
             initialJoinCode={group.joinCode}
             memberLimit={group.memberLimit}
             activeMemberCount={activeMemberCount}
+            hasPendingUpgradeRequest={pendingUpgradeRequest !== null}
           />
         </Card>
       )}

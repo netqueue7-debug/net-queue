@@ -3,7 +3,6 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { createSession } from "@/lib/auth/session";
 import { createRsvp } from "@/lib/rsvp/rsvp";
-import { WAIVER_VERSION } from "@/lib/waivers/content";
 import { addActiveMembership, createTestGroup, deleteTestGroup } from "./helpers/test-group";
 import { GET as listCommentsRoute, POST as postCommentRoute } from "@/app/api/events/[id]/comments/route";
 import { DELETE as deleteCommentRoute } from "@/app/api/events/[id]/comments/[commentId]/route";
@@ -38,16 +37,16 @@ describe("event comments", () => {
 
   beforeAll(async () => {
     const admin = await prisma.user.create({
-      data: { phone: adminPhone, waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone: adminPhone },
     });
     const member = await prisma.user.create({
-      data: { phone: memberPhone, waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone: memberPhone },
     });
     const otherMember = await prisma.user.create({
-      data: { phone: otherMemberPhone, waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone: otherMemberPhone },
     });
     const outsider = await prisma.user.create({
-      data: { phone: outsiderPhone, waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone: outsiderPhone },
     });
     adminId = admin.id;
     memberId = member.id;

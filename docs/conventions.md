@@ -14,7 +14,6 @@ lib/
   auth/                 session, OTP, rate limiting
   events/               event + series services
   rsvp/                 queue engine  ← the heart of the system
-  waivers/
   notifications/
   serializers/          shape DB rows into API responses (location gating lives here)
 prisma/schema.prisma

@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Input, Textarea, Select } from "@/components/ui/inputs";
 import { ErrorText } from "@/components/ui/text";
 import { US_TIMEZONES } from "@/lib/us-timezones";
+import { autofillMapsLinksOnBlur } from "@/lib/maps-links";
+import { looksLikeAddress, EXACT_LOCATION_HINT } from "@/lib/events/exact-location";
 
 export interface EventFormInitialValues {
   title: string;
@@ -35,7 +37,7 @@ export interface EventFormBody {
   waiverRequired: boolean;
   signupOpensAt: string;
   generalLocation: string | null;
-  exactLocation: string | null;
+  exactLocation: string;
   googleMapsUrl: string | null;
   appleMapsUrl: string | null;
   locationRevealPolicy: FormDataEntryValue | null;
@@ -84,6 +86,13 @@ export function EventForm({
     const maxGuestsRaw = form.get("maxGuestsPerRsvp") as string;
     const revealHoursRaw = form.get("locationRevealHours") as string;
     const startsAt = new Date(form.get("startsAt") as string);
+    const exactLocation = form.get("exactLocation") as string;
+
+    if (!looksLikeAddress(exactLocation)) {
+      setError(EXACT_LOCATION_HINT);
+      setLoading(false);
+      return;
+    }
 
     const signupOpensAt = isEditing
       ? new Date(form.get("signupOpensAt") as string)
@@ -102,7 +111,7 @@ export function EventForm({
       waiverRequired: form.get("waiverRequired") === "on",
       signupOpensAt: signupOpensAt.toISOString(),
       generalLocation: (form.get("generalLocation") as string) || null,
-      exactLocation: (form.get("exactLocation") as string) || null,
+      exactLocation,
       googleMapsUrl: (form.get("googleMapsUrl") as string) || null,
       appleMapsUrl: (form.get("appleMapsUrl") as string) || null,
       locationRevealPolicy: form.get("locationRevealPolicy"),
@@ -190,7 +199,13 @@ export function EventForm({
       <div className={sectionClass}>
         <h3 className={sectionHeaderClass}>Location</h3>
         <Input name="generalLocation" placeholder="General location" defaultValue={iv?.generalLocation} />
-        <Input name="exactLocation" placeholder="Exact location" defaultValue={iv?.exactLocation} />
+        <Input
+          name="exactLocation"
+          placeholder='Exact location — a real address (e.g. "123 Main St, Springfield")'
+          required
+          defaultValue={iv?.exactLocation}
+          onBlur={autofillMapsLinksOnBlur}
+        />
         <Input name="googleMapsUrl" type="url" placeholder="Google Maps link (optional)" defaultValue={iv?.googleMapsUrl} />
         <Input name="appleMapsUrl" type="url" placeholder="Apple Maps link (optional)" defaultValue={iv?.appleMapsUrl} />
 

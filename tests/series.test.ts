@@ -1,10 +1,26 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
-import { createSeries, cancelSeries, updateSeries } from "@/lib/events/series";
+import { createSeries, cancelSeries, cancelSeriesWeekday, updateSeries } from "@/lib/events/series";
 import { createRsvp } from "@/lib/rsvp/rsvp";
+import { createSession } from "@/lib/auth/session";
+import { zonedWeekday } from "@/lib/timezone";
 import { computeDerivedStatuses } from "@/lib/rsvp/seat-math";
-import { WAIVER_VERSION } from "@/lib/waivers/content";
+import { GroupWaiverNotConfiguredError } from "@/lib/groups/errors";
 import { addActiveMembership, createTestGroup, deleteTestGroup } from "./helpers/test-group";
+import { PATCH as patchEventRoute } from "@/app/api/events/[id]/route";
+import { PATCH as patchSeriesRoute } from "@/app/api/event-series/[id]/route";
+
+function req(url: string, opts: { method?: string; body?: unknown; token?: string } = {}) {
+  return new NextRequest(url, {
+    method: opts.method ?? "GET",
+    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    headers: {
+      ...(opts.token ? { cookie: `session=${opts.token}` } : {}),
+      ...(opts.body !== undefined ? { "Content-Type": "application/json" } : {}),
+    },
+  });
+}
 
 function localWallClock(instant: Date, timezone: string): string {
   return new Intl.DateTimeFormat("en-US", { timeZone: timezone, hourCycle: "h23", hour: "2-digit", minute: "2-digit" }).format(
@@ -37,13 +53,15 @@ describe("event series", () => {
     "+15555550602",
     "+15555550603",
     "+15555550604",
+    "+15555550605",
+    "+15555550606",
   ];
   let adminId: string;
   let groupId: string;
 
   beforeAll(async () => {
     const admin = await prisma.user.create({
-      data: { phone: adminPhone, role: "admin", waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone: adminPhone, role: "admin" },
     });
     adminId = admin.id;
     groupId = (await createTestGroup(adminId, "Series Test Group")).id;
@@ -159,11 +177,112 @@ describe("event series", () => {
     expect(byId.get(untouchedFutureInstance.id)?.capacity).toBe(7); // propagated
   });
 
+  it("PATCH /api/events/:id marks the edited instance overridden, protecting it from a later series-wide edit", async () => {
+    const { series } = await createSeries(adminId, {
+      groupId,
+      title: "Overridden Flag Series",
+      description: null,
+      weekdays: [0, 1, 2, 3, 4, 5, 6],
+      startTime: "18:00",
+      endTime: "19:00",
+      timezone: "America/New_York",
+      recurUntil: daysFromNow(6, "America/New_York"),
+      signupOpensRule: "immediately",
+      signupOpensDaysBefore: null,
+      capacity: 4,
+      maxGuestsPerRsvp: null,
+      waiverRequired: false,
+      generalLocation: null,
+      exactLocation: null,
+      googleMapsUrl: null,
+      appleMapsUrl: null,
+      locationRevealPolicy: "always",
+      locationRevealHours: null,
+    });
+
+    const instances = await prisma.event.findMany({ where: { seriesId: series.id }, orderBy: { startsAt: "asc" } });
+    expect(instances.length).toBeGreaterThanOrEqual(2);
+    const target = instances[0];
+    const adminToken = (await createSession(adminId)).token;
+
+    // A plain single-instance edit through the real route — not a direct
+    // Prisma write like the test above — is the thing that was previously
+    // never flipping `overridden` at all (the bug this fix closes).
+    const res = await patchEventRoute(
+      req(`http://localhost/api/events/${target.id}`, { method: "PATCH", token: adminToken, body: { capacity: 99 } }),
+      { params: Promise.resolve({ id: target.id }) },
+    );
+    expect(res.status).toBe(200);
+
+    const afterEdit = await prisma.event.findUniqueOrThrow({ where: { id: target.id } });
+    expect(afterEdit.overridden).toBe(true);
+    expect(afterEdit.capacity).toBe(99);
+
+    const { updatedCount } = await updateSeries(series.id, { capacity: 7 }, adminId);
+    expect(updatedCount).toBe(instances.length - 1); // every instance except the one just hand-edited
+
+    const stillProtected = await prisma.event.findUniqueOrThrow({ where: { id: target.id } });
+    expect(stillProtected.capacity).toBe(99); // untouched by the series edit
+  });
+
+  it("PATCH /api/event-series/:id is group-admin-gated and propagates to future instances", async () => {
+    const member = await prisma.user.create({
+      data: { phone: "+15555550606" },
+    });
+    await addActiveMembership(groupId, member.id, "member");
+    const memberToken = (await createSession(member.id)).token;
+    const adminToken = (await createSession(adminId)).token;
+
+    const { series } = await createSeries(adminId, {
+      groupId,
+      title: "Route-Level Series Edit",
+      description: null,
+      weekdays: [0, 1, 2, 3, 4, 5, 6],
+      startTime: "18:00",
+      endTime: "19:00",
+      timezone: "America/New_York",
+      recurUntil: daysFromNow(6, "America/New_York"),
+      signupOpensRule: "immediately",
+      signupOpensDaysBefore: null,
+      capacity: 4,
+      maxGuestsPerRsvp: null,
+      waiverRequired: false,
+      generalLocation: null,
+      exactLocation: null,
+      googleMapsUrl: null,
+      appleMapsUrl: null,
+      locationRevealPolicy: "always",
+      locationRevealHours: null,
+    });
+
+    const memberAttempt = await patchSeriesRoute(
+      req(`http://localhost/api/event-series/${series.id}`, { method: "PATCH", token: memberToken, body: { title: "Hacked" } }),
+      { params: Promise.resolve({ id: series.id }) },
+    );
+    expect(memberAttempt.status).toBe(403);
+
+    const adminAttempt = await patchSeriesRoute(
+      req(`http://localhost/api/event-series/${series.id}`, {
+        method: "PATCH",
+        token: adminToken,
+        body: { title: "Renamed via Route" },
+      }),
+      { params: Promise.resolve({ id: series.id }) },
+    );
+    expect(adminAttempt.status).toBe(200);
+    const body = await adminAttempt.json();
+    expect(body.series.title).toBe("Renamed via Route");
+    expect(body.updatedCount).toBeGreaterThan(0);
+
+    const instances = await prisma.event.findMany({ where: { seriesId: series.id } });
+    expect(instances.every((i) => i.title === "Renamed via Route")).toBe(true);
+  });
+
   it("capacity propagation from a series edit still promotes from the waitlist on affected instances", async () => {
     const memberPhones = ["+15555550601", "+15555550602", "+15555550603"];
     const members = await Promise.all(
       memberPhones.map((phone) =>
-        prisma.user.create({ data: { phone, waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() } }),
+        prisma.user.create({ data: { phone } }),
       ),
     );
     await Promise.all(members.map((m) => addActiveMembership(groupId, m.id)));
@@ -207,7 +326,7 @@ describe("event series", () => {
   it("cancellation: cancels every future instance including overridden ones, leaves the past alone, notifies active RSVPs", async () => {
     const memberPhone = "+15555550604";
     const member = await prisma.user.create({
-      data: { phone: memberPhone, waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone: memberPhone },
     });
     await addActiveMembership(groupId, member.id);
 
@@ -258,6 +377,69 @@ describe("event series", () => {
       where: { eventId: overriddenInstance.id, userId: member.id, type: "event_canceled" },
     });
     expect(notification).not.toBeNull();
+  });
+
+  it("cancelSeriesWeekday: cancels only the given weekday's future instances, including overridden ones, and drops it from series.weekdays", async () => {
+    const memberPhone = "+15555550605";
+    const member = await prisma.user.create({
+      data: { phone: memberPhone },
+    });
+    await addActiveMembership(groupId, member.id);
+
+    const { series } = await createSeries(adminId, {
+      groupId,
+      title: "Weekday Cancellation Series",
+      description: null,
+      weekdays: [2, 4], // Tue, Thu
+      startTime: "19:00",
+      endTime: "22:00",
+      timezone: "America/New_York",
+      recurUntil: daysFromNow(21, "America/New_York"),
+      signupOpensRule: "immediately",
+      signupOpensDaysBefore: null,
+      capacity: 10,
+      maxGuestsPerRsvp: null,
+      waiverRequired: false,
+      generalLocation: null,
+      exactLocation: null,
+      googleMapsUrl: null,
+      appleMapsUrl: null,
+      locationRevealPolicy: "always",
+      locationRevealHours: null,
+    });
+
+    const instances = await prisma.event.findMany({ where: { seriesId: series.id }, orderBy: { startsAt: "asc" } });
+    const tuesdays = instances.filter((e) => zonedWeekday(e.startsAt, e.timezone) === 2);
+    const thursdays = instances.filter((e) => zonedWeekday(e.startsAt, e.timezone) === 4);
+    expect(tuesdays.length).toBeGreaterThan(0);
+    expect(thursdays.length).toBeGreaterThan(0);
+
+    // Hand-edit one Thursday and RSVP a member to it — cancelSeriesWeekday
+    // should cancel it anyway and still notify the RSVP'd member.
+    const overriddenThursday = thursdays[0];
+    await prisma.event.update({ where: { id: overriddenThursday.id }, data: { overridden: true } });
+    await createRsvp(overriddenThursday.id, member.id);
+
+    const { canceledCount } = await cancelSeriesWeekday(series.id, 4, adminId);
+    expect(canceledCount).toBe(thursdays.length);
+
+    const refetched = await prisma.event.findMany({ where: { seriesId: series.id } });
+    const byId = new Map(refetched.map((e) => [e.id, e]));
+
+    for (const tue of tuesdays) {
+      expect(byId.get(tue.id)?.status).toBe("scheduled"); // untouched — different weekday
+    }
+    for (const thu of thursdays) {
+      expect(byId.get(thu.id)?.status).toBe("canceled"); // canceled, including the overridden one
+    }
+
+    const notification = await prisma.notification.findFirst({
+      where: { eventId: overriddenThursday.id, userId: member.id, type: "event_canceled" },
+    });
+    expect(notification).not.toBeNull();
+
+    const refetchedSeries = await prisma.eventSeries.findUniqueOrThrow({ where: { id: series.id } });
+    expect(refetchedSeries.weekdays).toEqual([2]); // Thursday dropped, Tuesday remains
   });
 
   it("recurStartsAt controls the earliest materialized instance, not just recurUntil", async () => {
@@ -334,5 +516,69 @@ describe("event series", () => {
     const instances = await prisma.event.findMany({ where: { seriesId: series.id }, orderBy: { startsAt: "asc" } });
     const localDate = (instant: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(instant);
     expect(localDate(instances[0].startsAt)).toBe(daysFromNow(0, timezone));
+  });
+
+  it("createSeries rejects waiverRequired: true when the group has no waiver configured", async () => {
+    await expect(
+      createSeries(adminId, {
+        groupId,
+        title: "No Waiver Series",
+        description: null,
+        weekdays: [1],
+        startTime: "18:00",
+        endTime: "19:00",
+        timezone: "America/New_York",
+        recurUntil: daysFromNow(2, "America/New_York"),
+        signupOpensRule: "immediately",
+        signupOpensDaysBefore: null,
+        capacity: 4,
+        maxGuestsPerRsvp: null,
+        waiverRequired: true,
+        generalLocation: null,
+        exactLocation: null,
+        googleMapsUrl: null,
+        appleMapsUrl: null,
+        locationRevealPolicy: "always",
+        locationRevealHours: null,
+      }),
+    ).rejects.toBeInstanceOf(GroupWaiverNotConfiguredError);
+  });
+
+  it("createSeries succeeds with waiverRequired: true once the group has a waiver configured, and updateSeries rejects turning it on again after the waiver is cleared", async () => {
+    await prisma.group.update({ where: { id: groupId }, data: { waiverContent: "Sign here.", waiverVersion: 1 } });
+    try {
+      const { series } = await createSeries(adminId, {
+        groupId,
+        title: "Group Waiver Series",
+        description: null,
+        weekdays: [1],
+        startTime: "18:00",
+        endTime: "19:00",
+        timezone: "America/New_York",
+        recurUntil: daysFromNow(2, "America/New_York"),
+        signupOpensRule: "immediately",
+        signupOpensDaysBefore: null,
+        capacity: 4,
+        maxGuestsPerRsvp: null,
+        waiverRequired: true,
+        generalLocation: null,
+        exactLocation: null,
+        googleMapsUrl: null,
+        appleMapsUrl: null,
+        locationRevealPolicy: "always",
+        locationRevealHours: null,
+      });
+      expect(series.waiverRequired).toBe(true);
+
+      // Clear the group's waiver, then confirm updateSeries can't flip
+      // waiverRequired back to true on this now-unconfigured group.
+      await prisma.group.update({ where: { id: groupId }, data: { waiverContent: null, waiverVersion: null } });
+      await expect(updateSeries(series.id, { waiverRequired: true }, adminId)).rejects.toBeInstanceOf(GroupWaiverNotConfiguredError);
+
+      await prisma.event.deleteMany({ where: { seriesId: series.id } });
+      await prisma.eventSeries.delete({ where: { id: series.id } });
+    } finally {
+      await prisma.group.update({ where: { id: groupId }, data: { waiverContent: null, waiverVersion: null } });
+    }
   });
 });

@@ -37,3 +37,17 @@ export const reorderMembershipsSchema = z.object({
 export const updateMemberLimitSchema = z.object({
   memberLimit: z.number().int().positive().nullable(),
 });
+
+export const createUpgradeRequestSchema = z.object({
+  requestedLimit: z.number().int().positive().nullable().optional(),
+  message: z.string().trim().max(2000).nullable().optional(),
+});
+
+export const resolveUpgradeRequestSchema = z.object({
+  decision: z.enum(["approved", "denied"]),
+  // Only meaningful when decision is "approved" — the platform admin's own
+  // chosen limit, not necessarily requestedLimit verbatim. Omitted/null
+  // leaves the group's current memberLimit untouched (e.g. approving a
+  // request that was really just "can we talk" with no number attached).
+  newLimit: z.number().int().positive().nullable().optional(),
+});

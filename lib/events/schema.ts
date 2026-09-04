@@ -1,11 +1,17 @@
 import { z } from "zod";
 import { windowStart, windowEnd } from "./window";
+import { looksLikeAddress, EXACT_LOCATION_HINT } from "./exact-location";
 
 const validTimezones = new Set(Intl.supportedValuesOf("timeZone"));
 
 const timezone = z.string().refine((tz) => validTimezones.has(tz), { message: "Not a recognized IANA timezone." });
 const locationRevealPolicy = z.enum(["always", "hours_before", "day_of", "hidden"]);
 const WINDOW_MESSAGE = "Events can only be scheduled between 1 month ago and 12 months from now.";
+
+// Required, not just optional free text (previously `.nullable().optional()`)
+// — an event needs a real address to post. Exported for reuse by
+// series-schema.ts, so a series requires the same thing.
+export const exactLocationSchema = z.string().trim().max(500).refine(looksLikeAddress, { message: EXACT_LOCATION_HINT });
 
 // Optional map link — an empty string (a blank form field) is treated the
 // same as omitting it entirely, not as "please enter a URL." Exported for
@@ -31,7 +37,7 @@ export const createEventSchema = z
     waiverRequired: z.boolean().optional(),
     signupOpensAt: z.coerce.date(),
     generalLocation: z.string().trim().max(500).nullable().optional(),
-    exactLocation: z.string().trim().max(500).nullable().optional(),
+    exactLocation: exactLocationSchema,
     googleMapsUrl: optionalMapUrl,
     appleMapsUrl: optionalMapUrl,
     locationRevealPolicy,
@@ -46,7 +52,6 @@ export const createEventSchema = z
     maxGuestsPerRsvp: v.maxGuestsPerRsvp ?? null,
     waiverRequired: v.waiverRequired ?? false,
     generalLocation: v.generalLocation ?? null,
-    exactLocation: v.exactLocation ?? null,
     googleMapsUrl: v.googleMapsUrl ? v.googleMapsUrl : null,
     appleMapsUrl: v.appleMapsUrl ? v.appleMapsUrl : null,
     locationRevealHours: v.locationRevealHours ?? null,
@@ -64,7 +69,7 @@ export const updateEventSchema = z
     waiverRequired: z.boolean(),
     signupOpensAt: z.coerce.date(),
     generalLocation: z.string().trim().max(500).nullable(),
-    exactLocation: z.string().trim().max(500).nullable(),
+    exactLocation: exactLocationSchema,
     googleMapsUrl: optionalMapUrl,
     appleMapsUrl: optionalMapUrl,
     locationRevealPolicy,

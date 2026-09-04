@@ -2,16 +2,13 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { WAIVER_MARKDOWN } from "@/lib/waivers/content";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/inputs";
-import { Card } from "@/components/ui/card";
 import { ErrorText } from "@/components/ui/text";
 
 export function OnboardingForm({ next }: { next?: string }) {
   const router = useRouter();
   const [displayName, setDisplayName] = useState("");
-  const [accepted, setAccepted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -24,7 +21,7 @@ export function OnboardingForm({ next }: { next?: string }) {
       const res = await fetch("/api/onboarding/complete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ displayName, waiverAccepted: accepted }),
+        body: JSON.stringify({ displayName }),
       });
 
       if (!res.ok) {
@@ -55,18 +52,9 @@ export function OnboardingForm({ next }: { next?: string }) {
           />
         </Field>
 
-        <Card>
-          <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap font-sans text-sm text-muted">{WAIVER_MARKDOWN}</pre>
-        </Card>
-
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={accepted} onChange={(e) => setAccepted(e.target.checked)} />
-          I have read and accept the waiver above.
-        </label>
-
         {error && <ErrorText>{error}</ErrorText>}
 
-        <Button type="submit" disabled={!accepted} loading={loading}>
+        <Button type="submit" loading={loading}>
           Continue
         </Button>
       </form>

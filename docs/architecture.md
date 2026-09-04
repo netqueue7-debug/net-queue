@@ -24,11 +24,11 @@ A **group** is the tenant boundary. Every event series, event, RSVP, and waiver 
 - **Two tiers: platform admin and group admin.** `User.role` (`member|admin`) from Phase 0 is repurposed as a rare **platform admin** tier — ops-only, for the people operating the deployment. Unlike a plain member, a platform admin has **full administrative control over every group**, with no membership row required in each one (`lib/groups/authz.ts#resolveGroupMembership` is the single place this override lives — every group-authz check funnels through it). Day-to-day admin-ness is **per group**, stored on `group_memberships.role`: a user can be an admin of one group and an ordinary member of another, and that authority never crosses into a group they don't administer. Platform admin is for setup/support/cross-group intervention; group admin is for actually running a group.
 - **Join policy is per group**, not global: `open` — a valid join code activates membership immediately; `approval` — the same join code creates a `pending` membership that a group admin must approve before the user sees any of that group's events. This reuses the existing guest-approval pattern (pending → admin decision → active) rather than inventing a new one.
 - **Discovery is by join code, not a directory.** Groups aren't publicly listable (`docs/policy.md`'s privacy rule extends to group existence, not just phone numbers). A group admin generates/shares `groups.join_code` out of band (text, link).
-- **One link works for both a brand-new phone number and an already-registered one.** `/join/:code` is the entry point regardless of auth state. An unauthenticated visitor is sent through login (OTP) and, if they've never onboarded, `display_name` + platform waiver, then redirected back to `/join/:code` to actually create the membership — the join code must survive that whole detour (session-backed `next` redirect, not a query param that a login form might drop). An already-authenticated, already-onboarded visitor hits `/join/:code` and joins immediately, no detour. This is one link to hand out in a group chat, not two.
+- **One link works for both a brand-new phone number and an already-registered one.** `/join/:code` is the entry point regardless of auth state. An unauthenticated visitor is sent through login (OTP) and, if they've never onboarded, `display_name` (no waiver at this stage — see below), then redirected back to `/join/:code` to actually create the membership — the join code must survive that whole detour (session-backed `next` redirect, not a query param that a login form might drop). An already-authenticated, already-onboarded visitor hits `/join/:code` and joins immediately, no detour. This is one link to hand out in a group chat, not two.
 - **Group creation is not self-serve.** For now, `POST /groups` requires the platform admin role (`users.role = admin`), not just any authenticated user — creating a group is an operational/sales action ("someone asks us to set them up"), gated the same way `npm run admin:promote` already gates the first platform admin. Whoever is designated as that group's admin is assigned by the platform admin at creation time (or promoted afterward via the group's own membership-role endpoint once it exists). This is a deliberate, revisitable restriction — see `docs/phase-0b-groups.md` — not a permanent architectural constraint; self-serve group creation can be opened up later behind its own decision (e.g. rate limits, abuse review) without a schema change.
 - **Visibility.** `GET /events` and every event/RSVP read filters by the caller's *active* group memberships. No active membership in a group → that group's events don't exist as far as the API is concerned. Admin-only fields (unfiltered listings, pre-reveal location) additionally require `group_memberships.role = admin` in that specific group. Phone numbers are not among these — no viewer, admin included, ever sees another member's number (see "Privacy" under Cross-cutting concerns).
-- **Two separate waivers, not one replaced by the other.** Phase 0's platform waiver (`users.waiver_accepted_at`/`waiver_version`, gating onboarding/basic app access) is untouched — everyone accepts it once, regardless of group. This feature adds a **second, independent, group-scoped waiver**: each group optionally owns its own waiver text/version, accepted per `(user, group)` on the membership row. A user can have accepted the platform waiver, group A's waiver, and not group B's, all at once.
-- **Group waiver *requirement* is per event/series**, layered on top: a group can mark specific series/events `waiver_required = true`. When true, RSVP creation additionally gates on that group's current waiver version being accepted by the member's membership row — on top of, not instead of, Phase 1's existing platform-waiver check. When a group has no waiver content configured, `waiver_required` simply can't be set true for its events (nothing to gate on).
+- **One waiver tier, scoped to the group.** Phase 0's original platform waiver (`users.waiver_accepted_at`/`waiver_version`, gating onboarding/basic app access) was removed 2026-09-03 — onboarding now only requires `display_name`. Each group optionally owns its own waiver text/version, accepted per `(user, group)` on the membership row. A user can have accepted group A's waiver and not group B's; there is no separate platform-level acceptance layered on top.
+- **Group waiver *requirement* is per event/series**: a group can mark specific series/events `waiver_required = true`. When true, RSVP creation gates on that group's current waiver version being accepted by the member's membership row. When a group has no waiver content configured, `waiver_required` can't be set true for its events (nothing to gate on) — enforced in `createEvent`/`updateEvent`/`createSeries`/`updateSeries` (`lib/groups/groups.ts#assertGroupWaiverConfigured`), not just documented.
 - **The queue engine and critical section are unchanged** — locking, seat math, and status derivation are still per-event and group-agnostic; group scoping is entirely an authorization/visibility layer in front of them, not a change to `withEventLock`.
 
 ## The core idea: one queue, not three lists
@@ -86,9 +86,9 @@ Serializing writes per event is entirely fine here — worst case is tens of wri
 
 ## Data model
 
-**users** — `id, phone (unique), display_name, role (member|admin — platform-level, ops only, see "Groups & tenancy"), waiver_accepted_at, waiver_version, banned_at, created_at`
+**users** — `id, phone (unique), display_name, role (member|admin — platform-level, ops only, see "Groups & tenancy"), banned_at, created_at`
 
-- `waiver_accepted_at`/`waiver_version` are unchanged from Phase 0: the platform onboarding waiver, one per user, independent of group membership.
+- No waiver fields here — the platform waiver was removed 2026-09-03 (see "One waiver tier, scoped to the group" above). Onboarding only requires `display_name`.
 
 **groups** — `id, name, join_policy (open|approval), join_code (unique, unguessable), waiver_content (nullable text), waiver_version (nullable int), created_by, created_at`
 
@@ -96,7 +96,7 @@ Serializing writes per event is entirely fine here — worst case is tens of wri
 
 **group_memberships** — `id, group_id, user_id, role (member|admin), status (active|pending), group_waiver_accepted_at (nullable), group_waiver_version_accepted (nullable), joined_at` · unique `(group_id, user_id)`
 
-- These `group_waiver_*` fields are a **second, independent** acceptance record from `users.waiver_accepted_at` — the group's own waiver, not the platform one. A user can accept the platform waiver once and then separately accept (or not) each group's waiver as they join.
+- These `group_waiver_*` fields are the only waiver-acceptance record on a membership — the group's own waiver, the only tier there is.
 - `banned_at` stays on `users` (global) for Phase 0's ban tool; a future per-group ban is a `group_memberships` addition, not built yet — out of scope for this change.
 
 **event_series** — `id, group_id, title, description, general_location, exact_location, location_reveal_policy, capacity, max_guests_per_rsvp, waiver_required, signup_opens_rule, weekdays[], start_time, end_time, recur_until, timezone, created_by`
@@ -117,8 +117,8 @@ Serializing writes per event is entirely fine here — worst case is tens of wri
 
 **waiver_signatures** — `id, group_id (nullable), waiver_version, signer_type (user|guest), user_id, guest_id, signed_at, ip`
 
-- Kept as the append-only evidentiary record (dispute resolution, audit) even though the live "has this user accepted the current version" check reads a fast-path field directly (`users.waiver_accepted_at` for the platform waiver, `group_memberships.group_waiver_accepted_at` for a group's) — same split Phase 0 already had.
-- `group_id` is `null` for a platform-waiver signature (Phase 0's original rows stay valid unchanged) and set for a group-waiver signature.
+- Kept as the append-only evidentiary record (dispute resolution, audit) even though the live "has this user accepted the current version" check reads a fast-path field directly (`group_memberships.group_waiver_accepted_at`) — same split Phase 0 originally had for its own (now-removed) platform waiver.
+- `group_id` is `null` on legacy rows from the removed platform waiver (kept as historical record, not backfilled or deleted) and set on every signature recorded going forward.
 
 **event_log** — `id, actor_user_id, event_id, action, payload (jsonb), created_at` · append-only; invaluable when someone disputes their queue spot.
 
@@ -136,7 +136,7 @@ Member (all group-scoped by `:groupId` in path or by the event's own `group_id`)
 
 Admin (requires `group_memberships.role = admin` on the event's group, **or** platform admin): `POST /groups/:groupId/events` · `POST /groups/:groupId/event-series` · `PATCH /events/:id` · `PATCH /event-series/:id` · `DELETE /events/:id` · `POST /guests/:id/approve` · `POST /guests/:id/reject` · `POST /events/:id/guests` (admin-added) · `PATCH /users/:id` (platform admin only — no group-admin equivalent for platform-level user fields)
 
-Public: `GET /waiver/:token` · `POST /waiver/:token/sign` (guest waivers, unchanged)
+Public: `GET /waiver/:token` · `POST /waiver/:token/sign` (guest waivers — signs the event's group's waiver when the group has one configured; when it doesn't, there's nothing to show or record — no platform-level fallback, since that tier no longer exists)
 
 ## Cross-cutting concerns
 
@@ -146,4 +146,4 @@ Public: `GET /waiver/:token` · `POST /waiver/:token/sign` (guest waivers, uncha
 
 **Privacy.** Members see display names only. Phone numbers are never surfaced on any RSVP/event/membership list, including to admins — an admin who needs to reach someone does so through the app's own notification channel, not by looking up a number. (The admin's own phone-based OTP flows, and a member's own number on their own `/settings` page, are unaffected — this rule is about *other people's* numbers.) A group's existence, membership list, and events are invisible to anyone without an active membership in it.
 
-**Notifications.** SMS only for the moments that matter (waitlist promotion, event canceled). Everything else in-app, to control Twilio cost. Promotion SMS must be idempotent and best-effort — a failed send never rolls back the queue mutation.
+**Notifications.** SMS only for the moments that matter (waitlist promotion, event canceled). Everything else in-app, to control Twilio cost. Promotion SMS must be idempotent and best-effort — a failed send never rolls back the queue mutation. Web push (added 2026-09-03) is a third, opt-in channel layered on top of `in_app` specifically — every in-app notification also pushes to a user's subscribed browsers/devices, independent of and never gating the in-app row's own `status`. Unlike SMS, push is not cost-constrained to "moments that matter," since it's free and user-controlled (opt-in per device, unsubscribe any time).

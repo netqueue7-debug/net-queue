@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { withEventLock } from "@/lib/rsvp/with-event-lock";
 import { enqueueNotification, dispatchNotifications } from "@/lib/notifications/notifications";
+import { assertGroupWaiverConfigured } from "@/lib/groups/groups";
 import type { Event, Prisma } from "@/lib/generated/prisma/client";
 
 export interface EventFields {
@@ -22,7 +23,11 @@ export interface EventFields {
   locationRevealHours: number | null;
 }
 
-export function createEvent(createdBy: string, input: EventFields): Promise<Event> {
+export async function createEvent(createdBy: string, input: EventFields): Promise<Event> {
+  if (input.waiverRequired) {
+    const group = await prisma.group.findUniqueOrThrow({ where: { id: input.groupId } });
+    assertGroupWaiverConfigured(group);
+  }
   return prisma.event.create({ data: { ...input, createdBy } });
 }
 
@@ -34,12 +39,14 @@ export function listEvents(groupId: string): Promise<Event[]> {
 }
 
 // Member-facing listing: not-canceled events across every group the viewer
-// has an active membership in. An empty `groupIds` (member of nothing)
-// correctly yields no events, not "all events" — never pass an unfiltered
-// query here.
+// has an active membership in, excluding ones that have already ended
+// (`endsAt`, not `startsAt` — an event currently in progress still counts
+// as "upcoming"/current, not passed). An empty `groupIds` (member of
+// nothing) correctly yields no events, not "all events" — never pass an
+// unfiltered query here.
 export function listUpcomingEvents(groupIds: string[]): Promise<Event[]> {
   return prisma.event.findMany({
-    where: { status: "scheduled", groupId: { in: groupIds } },
+    where: { status: "scheduled", groupId: { in: groupIds }, endsAt: { gt: new Date() } },
     orderBy: { startsAt: "asc" },
   });
 }
@@ -119,13 +126,33 @@ async function notifyIfRescheduledOrRelocated(
 // other field is a plain update, still wrapped in its own transaction so a
 // reschedule/relocation diff has a consistent before/after pair to compare.
 // If several fields change in the same call, both diffs run either way.
-export async function updateEvent(id: string, input: Partial<EventFields>, actorUserId?: string): Promise<Event> {
+//
+// `markOverridden` flips `overridden` to true alongside whatever else is
+// being changed — set only by the single-instance edit route (an admin
+// hand-editing one occurrence), never by `updateSeries`'s own propagation
+// loop, which is exactly the "this event vs. all following" distinction
+// `overridden` exists to encode (see the field's comment in schema.prisma
+// and lib/events/series.ts#updateSeries). Left `false` by default so every
+// other existing caller (tests, series propagation) is unaffected.
+export async function updateEvent(
+  id: string,
+  input: Partial<EventFields>,
+  actorUserId?: string,
+  options?: { markOverridden?: boolean },
+): Promise<Event> {
+  if (input.waiverRequired) {
+    const { groupId } = await prisma.event.findUniqueOrThrow({ where: { id }, select: { groupId: true } });
+    const group = await prisma.group.findUniqueOrThrow({ where: { id: groupId } });
+    assertGroupWaiverConfigured(group);
+  }
+
   const notificationIds: string[] = [];
+  const data = options?.markOverridden ? { ...input, overridden: true } : input;
 
   const updated = await (
     "capacity" in input
       ? withEventLock(id, async (tx, before) => {
-          const updatedRow = await tx.event.update({ where: { id }, data: input });
+          const updatedRow = await tx.event.update({ where: { id }, data });
 
           // The edit form always resubmits every field, so "capacity" in
           // input is true on every save, not just ones that actually
@@ -147,12 +174,13 @@ export async function updateEvent(id: string, input: Partial<EventFields>, actor
             // capacity change triggers via withEventLock's own boundary diff.
             const activeRsvps = await tx.rsvp.findMany({ where: { eventId: id, status: "active" }, select: { userId: true } });
             for (const rsvp of activeRsvps) {
-              await enqueueNotification(tx, {
+              const notification = await enqueueNotification(tx, {
                 userId: rsvp.userId,
                 eventId: id,
                 type: "capacity_changed",
                 payload: { eventTitle: updatedRow.title, from: before.capacity, to: updatedRow.capacity },
               });
+              notificationIds.push(notification.id);
             }
           }
 
@@ -162,7 +190,7 @@ export async function updateEvent(id: string, input: Partial<EventFields>, actor
         })
       : prisma.$transaction(async (tx) => {
           const before = await tx.event.findUniqueOrThrow({ where: { id } });
-          const updatedRow = await tx.event.update({ where: { id }, data: input });
+          const updatedRow = await tx.event.update({ where: { id }, data });
           notificationIds.push(...(await notifyIfRescheduledOrRelocated(tx, id, before, updatedRow, actorUserId)));
           return updatedRow;
         })

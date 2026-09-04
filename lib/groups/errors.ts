@@ -47,3 +47,21 @@ export class GroupMemberLimitReachedError extends Error {
     this.name = "GroupMemberLimitReachedError";
   }
 }
+
+export class UpgradeRequestNotFoundError extends Error {
+  constructor() {
+    super("Upgrade request not found.");
+    this.name = "UpgradeRequestNotFoundError";
+  }
+}
+
+// One open request per group at a time — a second submission while one is
+// still pending would just be noise in the platform admin's queue, and the
+// group already knows it has one outstanding (the UI shows it instead of
+// the request form).
+export class UpgradeRequestAlreadyPendingError extends Error {
+  constructor() {
+    super("This group already has a pending upgrade request.");
+    this.name = "UpgradeRequestAlreadyPendingError";
+  }
+}

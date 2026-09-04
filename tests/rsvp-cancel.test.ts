@@ -2,7 +2,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import { createRsvp, cancelRsvp } from "@/lib/rsvp/rsvp";
 import { computeDerivedStatuses } from "@/lib/rsvp/seat-math";
-import { WAIVER_VERSION } from "@/lib/waivers/content";
 import { RsvpNotFoundError } from "@/lib/rsvp/errors";
 import { addActiveMembership, createTestGroup, deleteTestGroup } from "./helpers/test-group";
 
@@ -20,8 +19,6 @@ describe("cancelRsvp", () => {
           data: {
             phone,
             role: i === 0 ? "admin" : "member",
-            waiverVersion: WAIVER_VERSION,
-            waiverAcceptedAt: new Date(),
           },
         }),
       ),

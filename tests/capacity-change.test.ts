@@ -3,7 +3,6 @@ import { prisma } from "@/lib/db";
 import { createRsvp } from "@/lib/rsvp/rsvp";
 import { updateEvent } from "@/lib/events/events";
 import { computeDerivedStatuses } from "@/lib/rsvp/seat-math";
-import { WAIVER_VERSION } from "@/lib/waivers/content";
 import { addActiveMembership, createTestGroup, deleteTestGroup } from "./helpers/test-group";
 
 describe("capacity change semantics", () => {
@@ -20,8 +19,6 @@ describe("capacity change semantics", () => {
           data: {
             phone,
             role: i === 0 ? "admin" : "member",
-            waiverVersion: WAIVER_VERSION,
-            waiverAcceptedAt: new Date(),
           },
         }),
       ),

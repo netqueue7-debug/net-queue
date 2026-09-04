@@ -9,6 +9,7 @@ const baseBody = {
   timezone: "America/New_York",
   signupOpensAt: new Date().toISOString(),
   locationRevealPolicy: "always" as const,
+  exactLocation: "123 Main St",
 };
 
 describe("event map link fields", () => {

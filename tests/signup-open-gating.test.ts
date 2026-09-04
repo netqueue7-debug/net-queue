@@ -2,7 +2,6 @@ import { afterAll, describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { createSession } from "@/lib/auth/session";
-import { WAIVER_VERSION } from "@/lib/waivers/content";
 import { POST as rsvpRoute } from "@/app/api/events/[id]/rsvp/route";
 import { addActiveMembership, createTestGroup, deleteTestGroup } from "./helpers/test-group";
 
@@ -26,7 +25,7 @@ describe("signup-open gating", () => {
 
   it("rejects a request one second before signup opens, accepts one second after", { timeout: 15_000 }, async () => {
     const admin = await prisma.user.create({
-      data: { phone, displayName: "Sam", role: "admin", waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone, displayName: "Sam", role: "admin" },
     });
     userId = admin.id;
     token = (await createSession(admin.id)).token;

@@ -1,6 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db";
-import { WAIVER_VERSION } from "@/lib/waivers/content";
 import {
   enqueueNotification,
   dispatchNotification,
@@ -18,21 +17,31 @@ vi.mock("@/lib/notifications/sms", async (importOriginal) => {
   return { ...actual, sendSms: (...args: unknown[]) => sendSmsMock(...args) };
 });
 
+const sendPushMock = vi.fn();
+vi.mock("web-push", () => ({
+  default: {
+    setVapidDetails: vi.fn(),
+    sendNotification: (...args: unknown[]) => sendPushMock(...args),
+  },
+}));
+
 describe("notifications dispatcher", () => {
   const phone = "+15555551000";
   let userId: string;
 
   beforeAll(async () => {
-    const user = await prisma.user.create({ data: { phone, waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() } });
+    const user = await prisma.user.create({ data: { phone } });
     userId = user.id;
   });
 
   afterEach(() => {
     sendSmsMock.mockReset();
+    sendPushMock.mockReset();
   });
 
   afterAll(async () => {
     await prisma.notification.deleteMany({ where: { userId } });
+    await prisma.pushSubscription.deleteMany({ where: { userId } });
     await prisma.user.deleteMany({ where: { id: userId } });
   });
 
@@ -122,6 +131,48 @@ describe("notifications dispatcher", () => {
 
     const stale = await prisma.notification.findUniqueOrThrow({ where: { id: staleOne.id } });
     expect(stale.status).toBe("sent");
+  });
+
+  it("dispatch: an in-app notification also pushes to every subscription the user has, without touching status/attempts", async () => {
+    sendPushMock.mockResolvedValue(undefined);
+    const sub = await prisma.pushSubscription.create({
+      data: { userId, endpoint: "https://push.example.com/a", p256dh: "p256dh", auth: "auth" },
+    });
+
+    const notification = await prisma.notification.create({
+      data: { userId, type: "guest_approved", channel: "in_app", status: "sent", sentAt: new Date(), payload: { guestName: "Robin" } },
+    });
+
+    await dispatchNotification(notification.id);
+
+    expect(sendPushMock).toHaveBeenCalledTimes(1);
+    const [pushSub, body] = sendPushMock.mock.calls[0];
+    expect(pushSub).toEqual({ endpoint: sub.endpoint, keys: { p256dh: "p256dh", auth: "auth" } });
+    expect(JSON.parse(body).body).toContain("Robin");
+
+    // Untouched — in-app delivery-tracking fields are SMS-only.
+    const unchanged = await prisma.notification.findUniqueOrThrow({ where: { id: notification.id } });
+    expect(unchanged.status).toBe("sent");
+    expect(unchanged.attempts).toBe(0);
+
+    await prisma.pushSubscription.delete({ where: { id: sub.id } });
+  });
+
+  it("dispatch: a push send that comes back 410 (gone) deletes the dead subscription instead of erroring", async () => {
+    const sub = await prisma.pushSubscription.create({
+      data: { userId, endpoint: "https://push.example.com/dead", p256dh: "p256dh", auth: "auth" },
+    });
+    const err = Object.assign(new Error("gone"), { statusCode: 410 });
+    sendPushMock.mockRejectedValue(err);
+
+    const notification = await prisma.notification.create({
+      data: { userId, type: "guest_rejected", channel: "in_app", status: "sent", sentAt: new Date(), payload: { guestName: "Robin" } },
+    });
+
+    await expect(dispatchNotification(notification.id)).resolves.toBeUndefined();
+
+    const gone = await prisma.pushSubscription.findUnique({ where: { id: sub.id } });
+    expect(gone).toBeNull();
   });
 
   it("in-app: listing, unread count, and marking read/read-all", async () => {
