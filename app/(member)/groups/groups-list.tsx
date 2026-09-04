@@ -21,6 +21,10 @@ export interface GroupCardData {
   role: "member" | "admin";
   status: "active" | "pending" | "rejected";
   activeMemberCount: number;
+  // Only ever non-zero when role is "admin" — a plain member never sees
+  // other members' pending join requests (listPublicMembers excludes them
+  // entirely), so this is left at 0 for them rather than fetched.
+  pendingMemberCount: number;
   waiverUpToDate: boolean;
 }
 
@@ -89,8 +93,11 @@ function SortableGroupCard({ card, origin }: { card: GroupCardData; origin: stri
 
             {card.status === "active" && (
               <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-                <Link href={`/groups/${card.groupId}/members`} className={navLinkClass}>
+                <Link href={`/groups/${card.groupId}/members`} className={`${navLinkClass} inline-flex items-center gap-1.5`}>
                   Members
+                  {card.role === "admin" && card.pendingMemberCount > 0 && (
+                    <Badge tone="warning">{card.pendingMemberCount} pending</Badge>
+                  )}
                 </Link>
                 <span aria-hidden className="text-border">
                   ·

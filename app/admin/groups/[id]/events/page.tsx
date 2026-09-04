@@ -34,20 +34,6 @@ export default async function GroupEventsPage({ params }: { params: Promise<{ id
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 p-4 sm:p-8">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-semibold">{group.name}: Events</h1>
-        <div className="flex flex-wrap gap-3 text-sm">
-          <Link href={`/admin/groups/${id}/dashboard`} className="underline">
-            Dashboard
-          </Link>
-          <Link href={`/admin/groups/${id}/series`} className="underline">
-            Recurring series
-          </Link>
-          <Link href={`/admin/groups/${id}/guests`} className="underline">
-            Pending guests
-          </Link>
-          <Link href={`/admin/groups/${id}/memberships`} className="underline">
-            Pending members
-          </Link>
-        </div>
       </div>
 
       <ul className="flex flex-col gap-2">

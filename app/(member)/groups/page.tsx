@@ -2,7 +2,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
 import { needsOnboarding } from "@/lib/auth/onboarding";
-import { listMyMemberships } from "@/lib/groups/groups";
+import { listMyMemberships, getPendingMembershipCounts } from "@/lib/groups/groups";
 import { JoinGroupForm } from "./join-group-form";
 import { GroupsList, type GroupCardData } from "./groups-list";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -13,6 +13,11 @@ export default async function GroupsPage() {
   if (needsOnboarding(user)) redirect("/onboarding");
 
   const memberships = await listMyMemberships(user.id);
+
+  // Only groups this user actually administers need the pending-count
+  // query — a plain member never sees other members' pending requests.
+  const adminGroupIds = memberships.filter((m) => m.role === "admin" && m.status === "active").map((m) => m.group.id);
+  const pendingCounts = adminGroupIds.length > 0 ? await getPendingMembershipCounts(adminGroupIds) : new Map<string, number>();
 
   const hdrs = await headers();
   const host = hdrs.get("host");
@@ -31,6 +36,7 @@ export default async function GroupsPage() {
     role: m.role,
     status: m.status,
     activeMemberCount: m.activeMemberCount,
+    pendingMemberCount: pendingCounts.get(m.group.id) ?? 0,
     waiverUpToDate: m.waiverUpToDate,
   }));
 

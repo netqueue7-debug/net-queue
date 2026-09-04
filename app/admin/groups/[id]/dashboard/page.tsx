@@ -38,14 +38,14 @@ export default async function GroupDashboardPage({ params }: { params: Promise<{
           <Link href={`/admin/groups/${id}/events`} className="underline">
             Manage events
           </Link>
-          <Link href={`/admin/groups/${id}/memberships`} className="underline">
+          <Link href={`/groups/${id}/members`} className="underline">
             Members
           </Link>
         </div>
       </div>
 
       <div className="flex flex-wrap gap-3 text-sm">
-        <Link href={`/admin/groups/${id}/memberships`} className="rounded border border-border px-3 py-2 underline">
+        <Link href={`/groups/${id}/members`} className="rounded border border-border px-3 py-2 underline">
           {summary.pendingMembershipCount} pending member{summary.pendingMembershipCount === 1 ? "" : "s"}
         </Link>
         <Link href={`/admin/groups/${id}/guests`} className="rounded border border-border px-3 py-2 underline">

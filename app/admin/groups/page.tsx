@@ -64,7 +64,10 @@ export default async function AdminGroupsPage() {
                     <Link href={`/admin/groups/${group.id}/events`} className="underline">
                       Events
                     </Link>
-                    <Link href={`/admin/groups/${group.id}/memberships`} className="underline">
+                    <Link href={`/admin/groups/${group.id}/dashboard`} className="underline">
+                      Dashboard
+                    </Link>
+                    <Link href={`/groups/${group.id}/members`} className="underline">
                       Pending members{pendingCount > 0 ? ` (${pendingCount})` : ""}
                     </Link>
                   </div>
