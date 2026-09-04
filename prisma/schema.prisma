@@ -60,6 +60,16 @@ enum GroupMembershipRole {
   admin
 }
 
+enum FeedbackType {
+  bug
+  feedback
+}
+
+enum FeedbackStatus {
+  open
+  resolved
+}
+
 // `rejected` exists from the start (not added later) so a group admin's
 // reject action and a user's resubmit-after-reject retry both have a real
 // state to land in — see docs/phase-0b-groups.md's join-flow task.
@@ -141,8 +151,28 @@ model User {
   notifications     Notification[]
   eventComments     EventComment[]
   pushSubscriptions PushSubscription[]
+  feedback          Feedback[]
 
   @@map("users")
+}
+
+// Bug reports and general feedback about the app itself — not group-scoped
+// (it's about the product, not a specific group's events), so triage is
+// platform-admin only rather than fitting the per-group admin model (see
+// docs/architecture.md#groups--tenancy).
+model Feedback {
+  id         String         @id @default(cuid())
+  userId     String         @map("user_id")
+  type       FeedbackType
+  body       String
+  status     FeedbackStatus @default(open)
+  createdAt  DateTime       @default(now()) @map("created_at")
+  resolvedAt DateTime?      @map("resolved_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([status, createdAt])
+  @@map("feedback")
 }
 
 // One row per browser/device the user has opted into push on — a user can

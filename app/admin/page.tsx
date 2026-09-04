@@ -19,6 +19,9 @@ export default async function AdminHomePage() {
       <Link href="/admin/groups" className="underline">
         All groups
       </Link>
+      <Link href="/admin/feedback" className="underline">
+        Feedback
+      </Link>
     </main>
   );
 }
