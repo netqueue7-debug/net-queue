@@ -3,7 +3,7 @@ import { computeDerivedStatuses } from "@/lib/rsvp/seat-math";
 import { getApprovedGuestCounts, seatsFor } from "@/lib/rsvp/seats";
 import { locationRevealAt } from "@/lib/serializers/event";
 import { zonedDateString } from "@/lib/timezone";
-import { enqueueNotification } from "./notifications";
+import { enqueueNotification, dispatchNotification } from "./notifications";
 import type { Event } from "@/lib/generated/prisma/client";
 
 // Cron-driven notifications are meant to fire **at most once per (user,
@@ -12,7 +12,11 @@ import type { Event } from "@/lib/generated/prisma/client";
 // existing row before enqueueing, instead of relying on enqueueNotification's
 // no-dedupe-by-default behavior. This is what makes "running one twice
 // sends nothing twice" (docs/phase-3-polish.md) true for these two jobs.
-async function alreadyNotified(userId: string, eventId: string, type: "location_reveal" | "day_before_reminder"): Promise<boolean> {
+async function alreadyNotified(
+  userId: string,
+  eventId: string,
+  type: "location_reveal" | "day_before_reminder" | "signup_opened",
+): Promise<boolean> {
   const existing = await prisma.notification.findFirst({ where: { userId, eventId, type } });
   return existing !== null;
 }
@@ -38,6 +42,11 @@ async function activeUserIds(eventId: string): Promise<string[]> {
   return active.map((r) => r.userId);
 }
 
+async function activeGroupMemberIds(groupId: string): Promise<string[]> {
+  const memberships = await prisma.groupMembership.findMany({ where: { groupId, status: "active" }, select: { userId: true } });
+  return memberships.map((m) => m.userId);
+}
+
 // Notifies the going list once each event's location actually reveals.
 // `always`-policy events have no reveal moment (already always visible),
 // so they're excluded entirely.
@@ -52,9 +61,10 @@ export async function runLocationRevealJob(now: Date = new Date()): Promise<numb
 
     for (const userId of await goingUserIds(event)) {
       if (await alreadyNotified(userId, event.id, "location_reveal")) continue;
-      await prisma.$transaction((tx) =>
+      const notification = await prisma.$transaction((tx) =>
         enqueueNotification(tx, { userId, eventId: event.id, type: "location_reveal", payload: { eventTitle: event.title } }),
       );
+      await dispatchNotification(notification.id);
       sent++;
     }
   }
@@ -82,9 +92,39 @@ export async function runDayBeforeReminderJob(now: Date = new Date()): Promise<n
 
     for (const userId of await activeUserIds(event.id)) {
       if (await alreadyNotified(userId, event.id, "day_before_reminder")) continue;
-      await prisma.$transaction((tx) =>
+      const notification = await prisma.$transaction((tx) =>
         enqueueNotification(tx, { userId, eventId: event.id, type: "day_before_reminder", payload: { eventTitle: event.title } }),
       );
+      await dispatchNotification(notification.id);
+      sent++;
+    }
+  }
+  return sent;
+}
+
+// Notifies the whole group — not just existing RSVP holders, unlike the two
+// jobs above — the moment signup opens, since the people who need to hear
+// about it are precisely the ones who haven't RSVP'd yet. `signupOpensAt` is
+// already a concrete stored instant (lib/events/recurrence.ts), so no
+// per-event recomputation is needed; the query filters directly on it.
+//
+// `groupId` is test-only scoping (never passed by the real cron script) — this
+// job's audience is every active member of the group, not just RSVP holders,
+// so an unscoped run against a shared dev/test database notifies real
+// accounts on unrelated events. Tests must pass their own fixture's groupId.
+export async function runSignupOpenedJob(now: Date = new Date(), groupId?: string): Promise<number> {
+  const events = await prisma.event.findMany({
+    where: { status: "scheduled", startsAt: { gt: now }, signupOpensAt: { lte: now }, ...(groupId ? { groupId } : {}) },
+  });
+
+  let sent = 0;
+  for (const event of events) {
+    for (const userId of await activeGroupMemberIds(event.groupId)) {
+      if (await alreadyNotified(userId, event.id, "signup_opened")) continue;
+      const notification = await prisma.$transaction((tx) =>
+        enqueueNotification(tx, { userId, eventId: event.id, type: "signup_opened", payload: { eventTitle: event.title } }),
+      );
+      await dispatchNotification(notification.id);
       sent++;
     }
   }

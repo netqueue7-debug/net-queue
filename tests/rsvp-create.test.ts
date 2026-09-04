@@ -1,13 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import { createRsvp } from "@/lib/rsvp/rsvp";
-import { WAIVER_VERSION } from "@/lib/waivers/content";
-import {
-  AlreadyRsvpedError,
-  EventCanceledError,
-  UserBannedError,
-  WaiverNotAcceptedError,
-} from "@/lib/rsvp/errors";
+import { AlreadyRsvpedError, EventCanceledError, UserBannedError } from "@/lib/rsvp/errors";
 import { addActiveMembership, createTestGroup, deleteTestGroup } from "./helpers/test-group";
 
 describe("createRsvp", () => {
@@ -18,7 +12,7 @@ describe("createRsvp", () => {
 
   beforeAll(async () => {
     const admin = await prisma.user.create({
-      data: { phone: adminPhone, role: "admin", waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone: adminPhone, role: "admin" },
     });
     adminId = admin.id;
     groupId = (await createTestGroup(adminId, "RSVP Create Test Group")).id;
@@ -55,28 +49,13 @@ describe("createRsvp", () => {
 
   it("rejects a banned user", async () => {
     const banned = await prisma.user.create({
-      data: {
-        phone: "+15555550231",
-        role: "member",
-        waiverVersion: WAIVER_VERSION,
-        waiverAcceptedAt: new Date(),
-        bannedAt: new Date(),
-      },
+      data: { phone: "+15555550231", role: "member", bannedAt: new Date() },
     });
     await addActiveMembership(groupId, banned.id);
     const event = await makeOpenEvent();
     await expect(createRsvp(event.id, banned.id)).rejects.toBeInstanceOf(UserBannedError);
     await prisma.groupMembership.deleteMany({ where: { userId: banned.id } });
     await prisma.user.delete({ where: { id: banned.id } });
-  });
-
-  it("rejects a user who hasn't accepted the current waiver", async () => {
-    const noWaiver = await prisma.user.create({ data: { phone: "+15555550232", role: "member" } });
-    await addActiveMembership(groupId, noWaiver.id);
-    const event = await makeOpenEvent();
-    await expect(createRsvp(event.id, noWaiver.id)).rejects.toBeInstanceOf(WaiverNotAcceptedError);
-    await prisma.groupMembership.deleteMany({ where: { userId: noWaiver.id } });
-    await prisma.user.delete({ where: { id: noWaiver.id } });
   });
 
   it("assigns queue_position via MAX+1 and rejects a second active RSVP for the same user", async () => {
@@ -93,7 +72,7 @@ describe("createRsvp", () => {
   it("re-signing up after a cancellation creates a new row at the back of the queue", async () => {
     // Someone else signs up first so the queue has more than one position.
     const other = await prisma.user.create({
-      data: { phone: "+15555550233", role: "member", waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone: "+15555550233", role: "member" },
     });
     await addActiveMembership(groupId, other.id);
     await createRsvp(openEventId, other.id);

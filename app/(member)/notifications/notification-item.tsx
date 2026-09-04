@@ -26,6 +26,8 @@ function describe(n: InAppNotification): string {
       return `Location revealed for ${payload.eventTitle}.`;
     case "day_before_reminder":
       return `Reminder: ${payload.eventTitle} is tomorrow.`;
+    case "signup_opened":
+      return `RSVPs are now open for ${payload.eventTitle}.`;
     case "event_comment_posted": {
       const text = String(payload.commentBody ?? "");
       const preview = text.length > 80 ? `${text.slice(0, 80)}…` : text;

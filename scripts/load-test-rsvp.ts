@@ -19,7 +19,6 @@ async function main() {
   const { prisma } = await import("../lib/db");
   const { createRsvp } = await import("../lib/rsvp/rsvp");
   const { computeDerivedStatuses } = await import("../lib/rsvp/seat-math");
-  const { WAIVER_VERSION } = await import("../lib/waivers/content");
 
   const adminPhone = "+15555559000";
   const admin = await prisma.user.upsert({
@@ -41,7 +40,7 @@ async function main() {
       prisma.user.upsert({
         where: { phone },
         update: {},
-        create: { phone, displayName: `Load User ${phone}`, waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+        create: { phone, displayName: `Load User ${phone}` },
       }),
     ),
   );

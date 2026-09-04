@@ -5,7 +5,6 @@ import { createSession } from "@/lib/auth/session";
 import { createRsvp } from "@/lib/rsvp/rsvp";
 import { UserBannedError } from "@/lib/rsvp/errors";
 import { getBanPreview, banUser, unbanUser } from "@/lib/users/moderation";
-import { WAIVER_VERSION } from "@/lib/waivers/content";
 import { addActiveMembership, createTestGroup, deleteTestGroup } from "./helpers/test-group";
 import { GET as banPreviewRoute } from "@/app/api/users/[id]/ban-preview/route";
 import { POST as banRoute } from "@/app/api/users/[id]/ban/route";
@@ -29,10 +28,10 @@ describe("moderation (ban/unban)", () => {
 
   beforeAll(async () => {
     const admin = await prisma.user.create({
-      data: { phone: adminPhone, role: "admin", waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone: adminPhone, role: "admin" },
     });
     const member = await prisma.user.create({
-      data: { phone: memberPhone, waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone: memberPhone },
     });
     const outsiderAdmin = await prisma.user.create({ data: { phone: outsiderAdminPhone } });
 
@@ -128,7 +127,7 @@ describe("moderation (ban/unban)", () => {
 
   it("banUser is a no-op-safe helper directly (used by the route, exercised here for the explicit-cancellation guarantee)", async () => {
     const other = await prisma.user.create({
-      data: { phone: "+15555551203", waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone: "+15555551203" },
     });
     await addActiveMembership(groupId, other.id);
     await createRsvp(eventId, other.id);

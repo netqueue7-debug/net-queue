@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { AvatarUploader } from "./avatar-uploader";
 import { NameForm } from "./name-form";
 import { PhoneForm } from "./phone-form";
+import { PushNotificationsToggle } from "./push-notifications-toggle";
 
 export default async function SettingsPage() {
   const user = await getSession();
@@ -29,6 +30,11 @@ export default async function SettingsPage() {
         <div className="border-t border-border pt-5">
           <h2 className="mb-3 text-sm font-semibold text-muted">Phone number</h2>
           <PhoneForm currentPhone={user.phone} />
+        </div>
+
+        <div className="border-t border-border pt-5">
+          <h2 className="mb-3 text-sm font-semibold text-muted">Push notifications</h2>
+          <PushNotificationsToggle />
         </div>
       </Card>
     </main>

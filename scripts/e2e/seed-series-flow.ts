@@ -8,7 +8,6 @@ config({ path: ".env.local" });
 async function main() {
   const { prisma } = await import("../../lib/db");
   const { createSession } = await import("../../lib/auth/session");
-  const { WAIVER_VERSION } = await import("../../lib/waivers/content");
 
   const adminPhone = "+15555550700";
   const memberPhone = "+15555550701";
@@ -16,12 +15,12 @@ async function main() {
   const admin = await prisma.user.upsert({
     where: { phone: adminPhone },
     update: {},
-    create: { phone: adminPhone, displayName: "E2E Series Admin", waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+    create: { phone: adminPhone, displayName: "E2E Series Admin" },
   });
   const member = await prisma.user.upsert({
     where: { phone: memberPhone },
     update: {},
-    create: { phone: memberPhone, displayName: "E2E Series Member", waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+    create: { phone: memberPhone, displayName: "E2E Series Member" },
   });
 
   const group = await prisma.group.create({

@@ -3,8 +3,7 @@ import { prisma } from "@/lib/db";
 import { withEventLock } from "@/lib/rsvp/with-event-lock";
 import { RsvpNotFoundError } from "@/lib/rsvp/errors";
 import { GuestCapExceededError, GuestNotFoundError } from "./errors";
-import { enqueueNotification } from "@/lib/notifications/notifications";
-import { WAIVER_VERSION } from "@/lib/waivers/content";
+import { enqueueNotification, dispatchNotification } from "@/lib/notifications/notifications";
 import type { Guest } from "@/lib/generated/prisma/client";
 
 // Same entropy bar as a group join code (architecture.md) — this token is
@@ -82,7 +81,8 @@ export async function approveGuest(guestId: string, approverId: string): Promise
   const existing = await prisma.guest.findUnique({ where: { id: guestId }, include: { rsvp: true } });
   if (!existing) throw new GuestNotFoundError();
 
-  return withEventLock(existing.rsvp.eventId, async (tx) => {
+  let notificationId = "";
+  const guest = await withEventLock(existing.rsvp.eventId, async (tx) => {
     const guest = await tx.guest.update({
       where: { id: guestId },
       data: { approvalStatus: "approved", approvedBy: approverId, approvedAt: new Date() },
@@ -95,14 +95,17 @@ export async function approveGuest(guestId: string, approverId: string): Promise
         payload: { guestId, rsvpId: existing.rsvpId },
       },
     });
-    await enqueueNotification(tx, {
+    const notification = await enqueueNotification(tx, {
       userId: existing.rsvp.userId,
       eventId: existing.rsvp.eventId,
       type: "guest_approved",
       payload: { guestId, guestName: guest.name },
     });
+    notificationId = notification.id;
     return guest;
   });
+  await dispatchNotification(notificationId);
+  return guest;
 }
 
 // A rejected pending guest held no seat, so this never affects the
@@ -112,7 +115,8 @@ export async function rejectGuest(guestId: string, approverId: string): Promise<
   const existing = await prisma.guest.findUnique({ where: { id: guestId }, include: { rsvp: true } });
   if (!existing) throw new GuestNotFoundError();
 
-  return withEventLock(existing.rsvp.eventId, async (tx) => {
+  let notificationId = "";
+  const guest = await withEventLock(existing.rsvp.eventId, async (tx) => {
     const guest = await tx.guest.update({
       where: { id: guestId },
       data: { approvalStatus: "rejected", approvedBy: approverId, approvedAt: new Date() },
@@ -125,14 +129,17 @@ export async function rejectGuest(guestId: string, approverId: string): Promise<
         payload: { guestId, rsvpId: existing.rsvpId },
       },
     });
-    await enqueueNotification(tx, {
+    const notification = await enqueueNotification(tx, {
       userId: existing.rsvp.userId,
       eventId: existing.rsvp.eventId,
       type: "guest_rejected",
       payload: { guestId, guestName: guest.name },
     });
+    notificationId = notification.id;
     return guest;
   });
+  await dispatchNotification(notificationId);
+  return guest;
 }
 
 // Admin-added guests skip approval entirely (policy.md#5) — created
@@ -195,29 +202,67 @@ export interface GuestWaiverView {
   name: string | null;
   waiverSignedAt: Date | null;
   eventTitle: string;
+  // null when the event's group has no waiver configured — there is no
+  // platform-level fallback (removed 2026-09-03), so nothing is shown or
+  // recorded in that case.
+  waiverContent: string | null;
 }
+
+const guestWaiverEventSelect = {
+  title: true,
+  groupId: true,
+  group: { select: { waiverContent: true, waiverVersion: true } },
+} as const;
 
 export async function getGuestByWaiverToken(token: string): Promise<GuestWaiverView | null> {
   const guest = await prisma.guest.findUnique({
     where: { waiverToken: token },
-    include: { rsvp: { include: { event: { select: { title: true } } } } },
+    include: { rsvp: { include: { event: { select: guestWaiverEventSelect } } } },
   });
   if (!guest) return null;
-  return { guestId: guest.id, name: guest.name, waiverSignedAt: guest.waiverSignedAt, eventTitle: guest.rsvp.event.title };
+  const { group } = guest.rsvp.event;
+  const waiverContent = group.waiverContent !== null && group.waiverVersion !== null ? group.waiverContent : null;
+  return {
+    guestId: guest.id,
+    name: guest.name,
+    waiverSignedAt: guest.waiverSignedAt,
+    eventTitle: guest.rsvp.event.title,
+    waiverContent,
+  };
 }
 
 // Waivers never block anything (policy.md's derived rules) — signing has
 // no bearing on approval/attendance, it's purely an evidentiary record, so
-// this never touches the RSVP queue and needs no lock.
+// this never touches the RSVP queue and needs no lock. When the event's
+// group has no waiver configured, there's nothing to attest to — the
+// guest's name is still recorded, but no WaiverSignature row is created.
 export async function signGuestWaiver(token: string, name: string, ip: string): Promise<void> {
-  const guest = await prisma.guest.findUnique({ where: { waiverToken: token } });
+  const guest = await prisma.guest.findUnique({
+    where: { waiverToken: token },
+    include: { rsvp: { include: { event: { select: guestWaiverEventSelect } } } },
+  });
   if (!guest) throw new GuestNotFoundError();
+
+  const { event } = guest.rsvp;
+  const { group } = event;
+  const usingGroupWaiver = group.waiverContent !== null && group.waiverVersion !== null;
 
   const signedAt = new Date();
   await prisma.$transaction([
     prisma.guest.update({ where: { id: guest.id }, data: { name, waiverSignedAt: signedAt } }),
-    prisma.waiverSignature.create({
-      data: { waiverVersion: WAIVER_VERSION, signerType: "guest", guestId: guest.id, ip, signedAt },
-    }),
+    ...(usingGroupWaiver
+      ? [
+          prisma.waiverSignature.create({
+            data: {
+              waiverVersion: group.waiverVersion as number,
+              signerType: "guest" as const,
+              guestId: guest.id,
+              groupId: event.groupId,
+              ip,
+              signedAt,
+            },
+          }),
+        ]
+      : []),
   ]);
 }

@@ -19,6 +19,7 @@ This phase exists because Phase 1 shipped with a single global event/RSVP space 
 
 - [x] **Schema: add group-scoped waiver fields — additive, nothing removed from `users`.** Added `group_id` (nullable) to `waiver_signatures`. Added `waiver_content`/`waiver_version` (nullable) to `groups` and `group_waiver_accepted_at`/`group_waiver_version_accepted` (nullable) to `group_memberships`. `users.waiver_accepted_at`/`waiver_version` (the Phase 0 platform waiver) are untouched.
   - *Check:* migration applies clean; Phase 0's onboarding gate is unaffected (nothing about `users.waiver_accepted_at`/`waiver_version` changed).
+  - **Removed 2026-09-03**: `users.waiver_accepted_at`/`waiver_version` were later dropped entirely (see `docs/phase-0-foundations.md`) — the platform waiver tier this task deliberately left untouched no longer exists. The group-scoped fields added here are unaffected and are now the only waiver tier.
 
 - [x] **Backfill: default group.** `scripts/backfill-default-group.ts` (`npm run backfill:default-group`) creates one group from existing data (`join_policy: open`), migrates every `user.role = admin` into a `group_memberships.role = admin` row, everyone else into `active`/`member`, and stamped `group_id` onto every pre-existing event before the `NOT NULL` migration landed. Idempotent — safe to rerun (verified).
   - *Check:* ran against the dev database; every event has a non-null `group_id`; the platform-waiver gate is untouched.
@@ -61,6 +62,7 @@ This phase exists because Phase 1 shipped with a single global event/RSVP space 
 
 - [x] **Wire `waiver_required` into `createRsvp`.** New `GroupWaiverNotAcceptedError`, checked inside `withEventLock` right after the existing platform-waiver check, only when `event.waiverRequired` is true.
   - *Check:* `tests/groups.test.ts` — an event with `waiverRequired: true` rejects `createRsvp` with `GroupWaiverNotAcceptedError` until the group waiver is accepted (even for a user who already has the platform waiver), then succeeds.
+  - **Bug found and fixed 2026-09-03**: `architecture.md`'s stated rule that a group with no waiver configured "simply can't be set true" for `waiverRequired` was never actually enforced — an admin could set `waiverRequired: true` on an event/series whose group had no `waiverContent`/`waiverVersion`, which then made every RSVP to it permanently rejected (`GroupWaiverNotAcceptedError`, unrecoverable — there's no group waiver to ever accept). `createEvent`/`updateEvent` (`lib/events/events.ts`) and `createSeries`/`updateSeries` (`lib/events/series.ts`) now validate this via the shared `assertGroupWaiverConfigured` (`lib/groups/groups.ts`), reusing the existing `GroupWaiverNotConfiguredError` and its established 400 mapping. *Check:* `tests/events-crud-route.test.ts`, `tests/series.test.ts`.
 
 ## Part C — UI
 

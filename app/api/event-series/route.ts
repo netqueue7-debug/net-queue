@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireMember, UnauthorizedError, ForbiddenError } from "@/lib/auth/session";
 import { assertGroupAdmin } from "@/lib/groups/authz";
+import { GroupWaiverNotConfiguredError } from "@/lib/groups/errors";
 import { createSeriesSchema } from "@/lib/events/series-schema";
 import { createSeries, listSeriesForGroup } from "@/lib/events/series";
 
@@ -53,6 +54,11 @@ export async function POST(request: NextRequest) {
     throw e;
   }
 
-  const { series, eventsCreated } = await createSeries(admin.id, parsed.data);
-  return NextResponse.json({ series, eventsCreated }, { status: 201 });
+  try {
+    const { series, eventsCreated } = await createSeries(admin.id, parsed.data);
+    return NextResponse.json({ series, eventsCreated }, { status: 201 });
+  } catch (e) {
+    if (e instanceof GroupWaiverNotConfiguredError) return NextResponse.json({ error: e.message }, { status: 400 });
+    throw e;
+  }
 }

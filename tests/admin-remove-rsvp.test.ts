@@ -3,7 +3,6 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { createSession } from "@/lib/auth/session";
 import { createRsvp } from "@/lib/rsvp/rsvp";
-import { WAIVER_VERSION } from "@/lib/waivers/content";
 import { DELETE as removeRoute } from "@/app/api/admin/events/[id]/rsvp/route";
 import { addActiveMembership, createTestGroup, deleteTestGroup } from "./helpers/test-group";
 
@@ -21,13 +20,13 @@ describe("admin RSVP removal", () => {
 
   beforeAll(async () => {
     const admin = await prisma.user.create({
-      data: { phone: adminPhone, role: "admin", waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone: adminPhone, role: "admin" },
     });
     const member = await prisma.user.create({
-      data: { phone: memberPhone, waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone: memberPhone },
     });
     const memberB = await prisma.user.create({
-      data: { phone: memberBPhone, waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone: memberBPhone },
     });
     adminId = admin.id;
     memberId = member.id;

@@ -161,4 +161,40 @@ describe("admin single-event CRUD", () => {
     expect(stillThere).not.toBeNull();
     expect(stillThere?.status).toBe("canceled");
   });
+
+  it("admin cannot set waiverRequired true on create when the group has no waiver configured", async () => {
+    const res = await createRoute(
+      req("http://localhost/api/events", { method: "POST", body: { ...validEventBody, waiverRequired: true }, token: adminToken }),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/no waiver configured/i);
+  });
+
+  it("admin can set waiverRequired true once the group has a waiver configured, and can't set it via PATCH once the waiver is cleared again", async () => {
+    await prisma.group.update({ where: { id: groupId }, data: { waiverContent: "Sign here.", waiverVersion: 1 } });
+    try {
+      const createRes = await createRoute(
+        req("http://localhost/api/events", { method: "POST", body: { ...validEventBody, waiverRequired: true }, token: adminToken }),
+      );
+      expect(createRes.status).toBe(201);
+      const created = (await createRes.json()).event;
+      expect(created.waiverRequired).toBe(true);
+
+      // Clear the group's waiver, then confirm a PATCH can't flip
+      // waiverRequired to true on a different (currently-false) event either.
+      await prisma.group.update({ where: { id: groupId }, data: { waiverContent: null, waiverVersion: null } });
+      const otherRes = await createRoute(req("http://localhost/api/events", { method: "POST", body: validEventBody, token: adminToken }));
+      const other = (await otherRes.json()).event;
+      const patchRes = await patchRoute(
+        req(`http://localhost/api/events/${other.id}`, { method: "PATCH", body: { waiverRequired: true }, token: adminToken }),
+        { params: Promise.resolve({ id: other.id }) },
+      );
+      expect(patchRes.status).toBe(400);
+
+      await prisma.event.deleteMany({ where: { id: { in: [created.id, other.id] } } });
+    } finally {
+      await prisma.group.update({ where: { id: groupId }, data: { waiverContent: null, waiverVersion: null } });
+    }
+  });
 });

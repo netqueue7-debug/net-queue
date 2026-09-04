@@ -9,7 +9,6 @@ import {
   RsvpNotFoundError,
   SignupNotOpenError,
   UserBannedError,
-  WaiverNotAcceptedError,
 } from "@/lib/rsvp/errors";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -19,7 +18,6 @@ function mapRsvpError(e: unknown): NextResponse | null {
   if (e instanceof SignupNotOpenError) return NextResponse.json({ error: e.message }, { status: 403 });
   if (e instanceof EventCanceledError) return NextResponse.json({ error: e.message }, { status: 403 });
   if (e instanceof UserBannedError) return NextResponse.json({ error: e.message }, { status: 403 });
-  if (e instanceof WaiverNotAcceptedError) return NextResponse.json({ error: e.message }, { status: 403 });
   if (e instanceof GroupWaiverNotAcceptedError) return NextResponse.json({ error: e.message }, { status: 403 });
   if (e instanceof AlreadyRsvpedError) return NextResponse.json({ error: e.message }, { status: 409 });
   if (e instanceof RsvpNotFoundError) return NextResponse.json({ error: e.message }, { status: 404 });

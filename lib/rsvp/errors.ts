@@ -30,16 +30,9 @@ export class UserBannedError extends Error {
   }
 }
 
-export class WaiverNotAcceptedError extends Error {
-  constructor() {
-    super("You need to accept the current waiver before RSVPing.");
-    this.name = "WaiverNotAcceptedError";
-  }
-}
-
-// Distinct from WaiverNotAcceptedError (the platform waiver) — this is the
-// group's own waiver, required only when the event/series opts in via
-// `waiverRequired` (architecture.md#groups--tenancy, policy.md#6).
+// The group's own waiver, required only when the event/series opts in via
+// `waiverRequired` (architecture.md#groups--tenancy, policy.md#6). The only
+// waiver tier — the platform waiver was removed 2026-09-03.
 export class GroupWaiverNotAcceptedError extends Error {
   constructor() {
     super("You need to accept this group's waiver before RSVPing.");

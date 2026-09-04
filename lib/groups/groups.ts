@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { normalizeUsPhone } from "@/lib/auth/otp";
-import { enqueueNotification } from "@/lib/notifications/notifications";
+import { enqueueNotification, dispatchNotification } from "@/lib/notifications/notifications";
 import { getAdminGroupIds } from "@/lib/groups/authz";
 import {
   GroupNotFoundError,
@@ -293,19 +293,23 @@ export async function approveMembership(groupId: string, userId: string): Promis
   await findMembershipOrThrow(groupId, userId);
   const group = await getGroupOrThrow(groupId);
   await assertUnderMemberLimit(group);
-  return prisma.$transaction(async (tx) => {
+  let notificationId = "";
+  const membership = await prisma.$transaction(async (tx) => {
     const membership = await tx.groupMembership.update({
       where: { groupId_userId: { groupId, userId } },
       data: { status: "active" },
     });
-    await enqueueNotification(tx, {
+    const notification = await enqueueNotification(tx, {
       userId,
       eventId: null,
       type: "group_membership_approved",
       payload: { groupId, groupName: group.name },
     });
+    notificationId = notification.id;
     return membership;
   });
+  await dispatchNotification(notificationId);
+  return membership;
 }
 
 // A rejected membership can be resubmitted via joinGroupByCode — this is
@@ -313,19 +317,23 @@ export async function approveMembership(groupId: string, userId: string): Promis
 export async function rejectMembership(groupId: string, userId: string): Promise<GroupMembership> {
   await findMembershipOrThrow(groupId, userId);
   const group = await getGroupOrThrow(groupId);
-  return prisma.$transaction(async (tx) => {
+  let notificationId = "";
+  const membership = await prisma.$transaction(async (tx) => {
     const membership = await tx.groupMembership.update({
       where: { groupId_userId: { groupId, userId } },
       data: { status: "rejected" },
     });
-    await enqueueNotification(tx, {
+    const notification = await enqueueNotification(tx, {
       userId,
       eventId: null,
       type: "group_membership_rejected",
       payload: { groupId, groupName: group.name },
     });
+    notificationId = notification.id;
     return membership;
   });
+  await dispatchNotification(notificationId);
+  return membership;
 }
 
 // Promote/demote an *active* member's role within one group. Pending/
@@ -399,10 +407,20 @@ export async function getGroupWaiverStatus(
   return { waiverContent: group.waiverContent, waiverVersion: group.waiverVersion, accepted };
 }
 
+// Shared with event/series creation and updates (lib/events/events.ts,
+// lib/events/series.ts) — `waiverRequired` can't be set true on an
+// event/series whose group has nothing configured to gate on
+// (architecture.md), same rule this waiver-acceptance path already enforced.
+export function assertGroupWaiverConfigured(
+  group: Pick<Group, "waiverVersion">,
+): asserts group is Pick<Group, "waiverVersion"> & { waiverVersion: number } {
+  if (group.waiverVersion === null) throw new GroupWaiverNotConfiguredError();
+}
+
 export async function acceptGroupWaiver(groupId: string, userId: string, ip: string): Promise<void> {
   const group = await getGroupOrThrow(groupId);
   await findActiveMembershipOrThrow(groupId, userId);
-  if (group.waiverVersion === null) throw new GroupWaiverNotConfiguredError();
+  assertGroupWaiverConfigured(group);
 
   const signedAt = new Date();
   await prisma.$transaction([

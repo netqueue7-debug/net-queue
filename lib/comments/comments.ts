@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { enqueueNotification } from "@/lib/notifications/notifications";
+import { enqueueNotification, dispatchNotifications } from "@/lib/notifications/notifications";
 import { CommentNotFoundError } from "./errors";
 import type { EventComment } from "@/lib/generated/prisma/client";
 
@@ -41,7 +41,8 @@ export async function postComment(
   isGroupAdmin: boolean,
   eventTitle: string,
 ): Promise<EventComment> {
-  return prisma.$transaction(async (tx) => {
+  const notificationIds: string[] = [];
+  const comment = await prisma.$transaction(async (tx) => {
     const comment = await tx.eventComment.create({ data: { eventId, authorId, body } });
 
     if (isGroupAdmin) {
@@ -50,17 +51,20 @@ export async function postComment(
         select: { userId: true },
       });
       for (const rsvp of activeRsvps) {
-        await enqueueNotification(tx, {
+        const notification = await enqueueNotification(tx, {
           userId: rsvp.userId,
           eventId,
           type: "event_comment_posted",
           payload: { eventTitle, commentBody: body },
         });
+        notificationIds.push(notification.id);
       }
     }
 
     return comment;
   });
+  await dispatchNotifications(notificationIds);
+  return comment;
 }
 
 // Includes the owning event's groupId so a route can decide "author or

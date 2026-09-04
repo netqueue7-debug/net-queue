@@ -237,7 +237,7 @@ describe("groups", () => {
     expect(names).not.toContain("Approval Test Group"); // member never joined this one
   });
 
-  it("group waiver: required on an opt-in event, independent of the platform waiver", async () => {
+  it("group waiver: required on an opt-in event", async () => {
     const group = await prisma.group.findFirst({ where: { name: "Open Test Group" } });
 
     const setWaiver = await updateGroupRoute(
@@ -262,14 +262,6 @@ describe("groups", () => {
         waiverRequired: true,
         createdBy: groupAdminId,
       },
-    });
-
-    // memberId has no platform-waiver acceptance either — but that's a
-    // separate gate (WaiverNotAcceptedError); give them the platform waiver
-    // so this test isolates the *group* waiver check.
-    await prisma.user.update({
-      where: { id: memberId },
-      data: { waiverAcceptedAt: new Date(), waiverVersion: (await import("@/lib/waivers/content")).WAIVER_VERSION },
     });
 
     await expect(createRsvp(event.id, memberId)).rejects.toBeInstanceOf(GroupWaiverNotAcceptedError);

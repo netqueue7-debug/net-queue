@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { zonedTimeToUtc, zonedWeekday } from "@/lib/timezone";
 import { generateOccurrenceDates, materializeOccurrence } from "./recurrence";
 import { cancelEvent, updateEvent, type EventFields } from "./events";
+import { assertGroupWaiverConfigured } from "@/lib/groups/groups";
 import type { EventSeries } from "@/lib/generated/prisma/client";
 
 export interface CreateSeriesInput {
@@ -42,6 +43,11 @@ export async function createSeries(
   createdBy: string,
   input: CreateSeriesInput,
 ): Promise<{ series: EventSeries; eventsCreated: number }> {
+  if (input.waiverRequired) {
+    const group = await prisma.group.findUniqueOrThrow({ where: { id: input.groupId } });
+    assertGroupWaiverConfigured(group);
+  }
+
   const materializedAt = new Date();
   const recurUntilInstant = zonedTimeToUtc(input.recurUntil, "12:00", input.timezone);
   const recurStartsAtInstant = input.recurStartsAt ? zonedTimeToUtc(input.recurStartsAt, "12:00", input.timezone) : materializedAt;
@@ -147,6 +153,12 @@ export async function updateSeries(
   input: UpdateSeriesInput,
   actorUserId: string,
 ): Promise<{ series: EventSeries; updatedCount: number }> {
+  if (input.waiverRequired) {
+    const { groupId } = await prisma.eventSeries.findUniqueOrThrow({ where: { id: seriesId }, select: { groupId: true } });
+    const group = await prisma.group.findUniqueOrThrow({ where: { id: groupId } });
+    assertGroupWaiverConfigured(group);
+  }
+
   const series = await prisma.eventSeries.update({ where: { id: seriesId }, data: input });
 
   const futureInstances = await prisma.event.findMany({

@@ -2,7 +2,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import { createRsvp, cancelRsvp } from "@/lib/rsvp/rsvp";
 import { updateEvent } from "@/lib/events/events";
-import { WAIVER_VERSION } from "@/lib/waivers/content";
 import { addActiveMembership, createTestGroup, deleteTestGroup } from "./helpers/test-group";
 
 describe("event reschedule/relocation notifications", () => {
@@ -21,16 +20,16 @@ describe("event reschedule/relocation notifications", () => {
 
   beforeAll(async () => {
     const admin = await prisma.user.create({
-      data: { phone: adminPhone, role: "admin", waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone: adminPhone, role: "admin" },
     });
     const going = await prisma.user.create({
-      data: { phone: goingPhone, waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone: goingPhone },
     });
     const waitlist = await prisma.user.create({
-      data: { phone: waitlistPhone, waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone: waitlistPhone },
     });
     const canceled = await prisma.user.create({
-      data: { phone: canceledPhone, waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone: canceledPhone },
     });
     adminId = admin.id;
     goingId = going.id;

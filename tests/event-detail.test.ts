@@ -2,7 +2,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import { createRsvp, cancelRsvp } from "@/lib/rsvp/rsvp";
 import { getEventDetail } from "@/lib/rsvp/event-detail";
-import { WAIVER_VERSION } from "@/lib/waivers/content";
 import { addActiveMembership, createTestGroup, deleteTestGroup } from "./helpers/test-group";
 
 describe("getEventDetail", () => {
@@ -15,10 +14,10 @@ describe("getEventDetail", () => {
 
   beforeAll(async () => {
     const admin = await prisma.user.create({
-      data: { phone: adminPhone, displayName: "Admin", role: "admin", waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone: adminPhone, displayName: "Admin", role: "admin" },
     });
     const member = await prisma.user.create({
-      data: { phone: memberPhone, displayName: "Member", waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone: memberPhone, displayName: "Member" },
     });
     adminId = admin.id;
     memberId = member.id;

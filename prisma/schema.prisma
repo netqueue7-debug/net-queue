@@ -102,6 +102,7 @@ enum NotificationType {
   day_before_reminder
   event_comment_posted
   event_updated
+  signup_opened
 }
 
 enum NotificationChannel {
@@ -125,8 +126,6 @@ model User {
   displayName      String?   @map("display_name")
   avatarUrl        String?   @map("avatar_url")
   role             Role      @default(member)
-  waiverAcceptedAt DateTime? @map("waiver_accepted_at")
-  waiverVersion    Int?      @map("waiver_version")
   bannedAt         DateTime? @map("banned_at")
   createdAt        DateTime  @default(now()) @map("created_at")
 
@@ -139,10 +138,29 @@ model User {
   approvedGuests   Guest[]
   createdGroups    Group[]
   groupMemberships GroupMembership[]
-  notifications    Notification[]
-  eventComments    EventComment[]
+  notifications     Notification[]
+  eventComments     EventComment[]
+  pushSubscriptions PushSubscription[]
 
   @@map("users")
+}
+
+// One row per browser/device the user has opted into push on — a user can
+// have several (phone, laptop, ...), each with its own endpoint. Deleted on
+// unsubscribe or the moment a push send comes back 404/410 (the browser has
+// invalidated it), never left to accumulate dead rows.
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("push_subscriptions")
 }
 
 // The tenant boundary — see architecture.md#groups--tenancy. Not publicly
@@ -218,9 +236,11 @@ model Session {
   @@map("sessions")
 }
 
-// `groupId` is null for a platform-waiver signature (Phase 0's original
-// rows, and any future platform-waiver acceptance) and set for a
-// group-waiver signature (Phase 0b) — two independent waivers, one table.
+// `groupId` is null on legacy rows from Phase 0's platform waiver (removed
+// 2026-09-03 — see docs/policy.md) and is otherwise always set: every
+// signature recorded going forward is a group waiver acceptance, by a
+// member or a guest. Old null-groupId rows are kept as historical record,
+// not backfilled or deleted.
 // `guestId` is a real FK now that `guests` exists (Phase 2) — Phase 0's
 // original rows all have `signerType: user` and `guestId: null`, unaffected.
 model WaiverSignature {

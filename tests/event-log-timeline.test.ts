@@ -4,7 +4,6 @@ import { createRsvp, cancelRsvp } from "@/lib/rsvp/rsvp";
 import { updateEvent } from "@/lib/events/events";
 import { addGuests, approveGuest, adminAddGuests } from "@/lib/guests/guests";
 import { getEventLogTimeline } from "@/lib/admin/event-log";
-import { WAIVER_VERSION } from "@/lib/waivers/content";
 import { addActiveMembership, createTestGroup, deleteTestGroup } from "./helpers/test-group";
 
 describe("event log timeline", () => {
@@ -17,10 +16,10 @@ describe("event log timeline", () => {
 
   beforeAll(async () => {
     const admin = await prisma.user.create({
-      data: { phone: adminPhone, displayName: "Admin", role: "admin", waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone: adminPhone, displayName: "Admin", role: "admin" },
     });
     const member = await prisma.user.create({
-      data: { phone: memberPhone, displayName: "Member", waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone: memberPhone, displayName: "Member" },
     });
     adminId = admin.id;
     memberId = member.id;

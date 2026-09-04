@@ -33,10 +33,12 @@ Read alongside: `docs/architecture.md` (data model), `docs/conventions.md`.
   - *Check:* a user who hasn't accepted the current waiver version is redirected to the waiver screen and cannot reach member pages.
   - Built the full login journey to make this checkable: `/login` (phone + real Turnstile widget → OTP send/verify), `/onboarding` (display name + waiver), `/home` (placeholder member page). `display_name` is nullable on `users` until onboarding completes (a user row now exists once phone-verified, profile completion is a separate step).
   - Verified for real against the running dev server: unauthenticated → redirected to `/login`; authenticated-but-not-onboarded → redirected to `/onboarding`; after accepting → reaches `/home`.
+  - **Removed 2026-09-03**: the platform waiver tier described in this task and the next was removed entirely — see `docs/policy.md` and `docs/architecture.md`. Onboarding now only collects `display_name`; there is no waiver step at this layer. Group waivers (`docs/phase-0b-groups.md`) are the only remaining waiver tier.
 
 - [x] **Waiver content + versioning.** Waiver text stored as a versioned constant (`WAIVER_VERSION` + markdown). Bumping the version re-prompts everyone on next login.
   - *Check:* bumping the constant re-prompts an already-accepted user.
   - `lib/waivers/content.ts` — text is placeholder, clearly marked NOT reviewed/approved legal language. Replace before real signups; bumping `WAIVER_VERSION` when it's replaced is exactly what re-prompts everyone (proven in `tests/waiver-versioning.test.ts`).
+  - **Removed 2026-09-03** along with the platform waiver tier above — `lib/waivers/content.ts` and `tests/waiver-versioning.test.ts` no longer exist. Group admins now write their own waiver text per group (`Group.waiverContent`) instead of a single versioned platform constant.
 
 - [x] **Roles + first admin.** `role` on users; a seed script or one-off command to promote a phone number to admin.
   - *Check:* seeded admin can reach a placeholder `/admin` page; a member cannot.

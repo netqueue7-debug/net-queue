@@ -2,7 +2,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import { createRsvp, cancelRsvp } from "@/lib/rsvp/rsvp";
 import { updateEvent } from "@/lib/events/events";
-import { WAIVER_VERSION } from "@/lib/waivers/content";
 import { addActiveMembership, createTestGroup, deleteTestGroup } from "./helpers/test-group";
 
 describe("event_log writes", () => {
@@ -13,7 +12,7 @@ describe("event_log writes", () => {
 
   beforeAll(async () => {
     const admin = await prisma.user.create({
-      data: { phone, role: "admin", waiverVersion: WAIVER_VERSION, waiverAcceptedAt: new Date() },
+      data: { phone, role: "admin" },
     });
     adminId = admin.id;
     groupId = (await createTestGroup(adminId, "Event Log Test Group")).id;
