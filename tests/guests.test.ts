@@ -62,6 +62,7 @@ describe("guests", () => {
     await prisma.eventLog.deleteMany({ where: { eventId: { in: eventIds } } });
     await prisma.notification.deleteMany({ where: { eventId: { in: eventIds } } });
     await prisma.rsvp.deleteMany({ where: { eventId: { in: eventIds } } });
+    await prisma.eventComment.deleteMany({ where: { eventId: { in: eventIds } } });
     await prisma.event.deleteMany({ where: { id: { in: eventIds } } });
     await deleteTestGroup(groupId);
     await prisma.user.deleteMany({ where: { phone: { startsWith: "+15555550800" } } });

@@ -74,6 +74,7 @@ describe("event series", () => {
     await prisma.notification.deleteMany({ where: { event: { seriesId: { in: seriesIds } } } });
     await prisma.rsvp.deleteMany({ where: { event: { seriesId: { in: seriesIds } } } });
     await prisma.eventLog.deleteMany({ where: { event: { seriesId: { in: seriesIds } } } });
+    await prisma.eventComment.deleteMany({ where: { event: { seriesId: { in: seriesIds } } } });
     await prisma.event.deleteMany({ where: { seriesId: { in: seriesIds } } });
     await prisma.eventSeries.deleteMany({ where: { id: { in: seriesIds } } });
     await deleteTestGroup(groupId);
@@ -575,6 +576,7 @@ describe("event series", () => {
       await prisma.group.update({ where: { id: groupId }, data: { waiverContent: null, waiverVersion: null } });
       await expect(updateSeries(series.id, { waiverRequired: true }, adminId)).rejects.toBeInstanceOf(GroupWaiverNotConfiguredError);
 
+      await prisma.eventComment.deleteMany({ where: { event: { seriesId: series.id } } });
       await prisma.event.deleteMany({ where: { seriesId: series.id } });
       await prisma.eventSeries.delete({ where: { id: series.id } });
     } finally {

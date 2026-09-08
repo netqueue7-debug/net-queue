@@ -30,6 +30,7 @@ describe("GET /api/events/:id/ics", () => {
   let hiddenEventId: string;
 
   afterAll(async () => {
+    await prisma.eventComment.deleteMany({ where: { eventId: { in: eventIds } } });
     await prisma.event.deleteMany({ where: { id: { in: eventIds } } });
     for (const g of groupIds) await deleteTestGroup(g);
     await prisma.user.deleteMany({ where: { phone: { in: allPhones } } });

@@ -64,6 +64,7 @@ describe("listEventsInRange", () => {
   const eventIds: string[] = [];
 
   afterAll(async () => {
+    await prisma.eventComment.deleteMany({ where: { eventId: { in: eventIds } } });
     await prisma.event.deleteMany({ where: { id: { in: eventIds } } });
     await deleteTestGroup(groupId);
     await prisma.user.deleteMany({ where: { phone } });

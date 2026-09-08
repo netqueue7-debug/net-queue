@@ -59,9 +59,9 @@ test.describe("join flow", () => {
     runTsx("scripts/e2e/cleanup-join-flow.ts", fixtures.phones);
   });
 
-  test("an unauthenticated visitor is redirected to login with the join code preserved", async ({ page }) => {
+  test("an unauthenticated visitor is redirected to signup with the join code preserved", async ({ page }) => {
     await page.goto(`/join/${fixtures.openGroupJoinCode}`);
-    await expect(page).toHaveURL(new RegExp(`/login\\?next=%2Fjoin%2F${fixtures.openGroupJoinCode}`));
+    await expect(page).toHaveURL(new RegExp(`/signup\\?next=%2Fjoin%2F${fixtures.openGroupJoinCode}`));
   });
 
   test("an authenticated-but-not-onboarded visitor is redirected to onboarding with the join code preserved", async ({
