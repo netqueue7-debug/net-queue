@@ -36,6 +36,7 @@ describe("withEventLock", () => {
   afterAll(async () => {
     await prisma.notification.deleteMany({ where: { eventId } });
     await prisma.rsvp.deleteMany({ where: { eventId } });
+    await prisma.eventComment.deleteMany({ where: { eventId } });
     await prisma.event.deleteMany({ where: { id: eventId } });
     await deleteTestGroup(groupId);
     await prisma.user.deleteMany({ where: { phone: { in: [phone, phoneB] } } });

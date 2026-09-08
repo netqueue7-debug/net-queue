@@ -20,6 +20,11 @@ export interface RsvpListItem {
   rsvpId: string;
   userId: string;
   displayName: string | null;
+  // For `going` entries, the raw global queue position (not shown in the
+  // UI). For `waitlist` entries, the party's 1-based rank *within the
+  // waitlist* — "#1" is the next party in line for a seat, not the party's
+  // absolute position in the whole event's FIFO queue (which would be
+  // inflated by everyone already going).
   queuePosition: number;
   // Rejected/removed guests are excluded — they're no longer part of the
   // party (docs/phase-2-recurrence-guests.md's "UI for parties" task).
@@ -93,7 +98,7 @@ export async function getEventDetail(eventId: string, viewer: { id: string }): P
     event.capacity,
   );
 
-  function toItem(r: (typeof rsvps)[number]): RsvpListItem {
+  function toItem(r: (typeof rsvps)[number], displayPosition: number = r.queuePosition): RsvpListItem {
     const showWaiverTokens = viewerRole === "admin" || r.userId === viewer.id;
     const guestsForItem = (guestsByRsvp.get(r.id) ?? []).map((g) =>
       showWaiverTokens ? g : { id: g.id, name: g.name, approvalStatus: g.approvalStatus },
@@ -102,13 +107,17 @@ export async function getEventDetail(eventId: string, viewer: { id: string }): P
       rsvpId: r.id,
       userId: r.userId,
       displayName: r.user.displayName,
-      queuePosition: r.queuePosition,
+      queuePosition: displayPosition,
       guests: guestsForItem,
     };
   }
 
-  const going = active.filter((r) => statuses.get(r.id) === "going").map(toItem);
-  const waitlist = active.filter((r) => statuses.get(r.id) === "waitlist").map(toItem);
+  const going = active.filter((r) => statuses.get(r.id) === "going").map((r) => toItem(r));
+  const waitlistActive = active.filter((r) => statuses.get(r.id) === "waitlist");
+  // Rank within the waitlist, not the global queue position — see
+  // RsvpListItem.queuePosition. `waitlistActive` is already in queue order
+  // (active came from a queuePosition-ordered query), so the index is it.
+  const waitlist = waitlistActive.map((r, i) => toItem(r, i + 1));
   // Canceled rows are never deleted (audit trail) — repeated cancel/re-RSVP
   // cycles for the same user leave one row per cycle. The Canceled list
   // should read as "who's currently not going," not a full history, so:
@@ -135,8 +144,12 @@ export async function getEventDetail(eventId: string, viewer: { id: string }): P
   const canceledItems = [...latestCanceledByUser.values()].map(toItem);
 
   const yours = active.find((r) => r.userId === viewer.id);
+  const yourWaitlistIndex = yours ? waitlistActive.findIndex((r) => r.id === yours.id) : -1;
   const yourRsvp = yours
-    ? { status: statuses.get(yours.id) ?? null, queuePosition: yours.queuePosition }
+    ? {
+        status: statuses.get(yours.id) ?? null,
+        queuePosition: yourWaitlistIndex === -1 ? yours.queuePosition : yourWaitlistIndex + 1,
+      }
     : {
         status: canceled.some((r) => r.userId === viewer.id) ? ("canceled" as const) : null,
         queuePosition: null,

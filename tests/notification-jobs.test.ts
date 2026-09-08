@@ -30,6 +30,7 @@ describe("notification cron jobs", () => {
     const eventIds = events.map((e) => e.id);
     await prisma.notification.deleteMany({ where: { eventId: { in: eventIds } } });
     await prisma.rsvp.deleteMany({ where: { eventId: { in: eventIds } } });
+    await prisma.eventComment.deleteMany({ where: { eventId: { in: eventIds } } });
     await prisma.event.deleteMany({ where: { id: { in: eventIds } } });
     await deleteTestGroup(groupId);
     await prisma.user.deleteMany({ where: { phone: { in: [adminPhone, memberPhone] } } });

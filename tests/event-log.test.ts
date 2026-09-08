@@ -38,6 +38,7 @@ describe("event_log writes", () => {
     await prisma.eventLog.deleteMany({ where: { eventId } });
     await prisma.notification.deleteMany({ where: { eventId } });
     await prisma.rsvp.deleteMany({ where: { eventId } });
+    await prisma.eventComment.deleteMany({ where: { eventId } });
     await prisma.event.deleteMany({ where: { id: eventId } });
     await deleteTestGroup(groupId);
     await prisma.user.deleteMany({ where: { phone } });

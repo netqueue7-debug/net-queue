@@ -34,6 +34,7 @@ describe("admin single-event CRUD", () => {
   let validEventBody: typeof baseEventBody & { groupId: string };
 
   afterAll(async () => {
+    if (eventId) await prisma.eventComment.deleteMany({ where: { eventId } });
     if (eventId) await prisma.event.deleteMany({ where: { id: eventId } });
     if (groupId) await deleteTestGroup(groupId);
     await prisma.user.deleteMany({ where: { phone: { in: [adminPhone, memberPhone] } } });
@@ -114,6 +115,7 @@ describe("admin single-event CRUD", () => {
       // Started but not yet ended still counts as current, not "passed".
       expect(ids).toContain(inProgress.id);
     } finally {
+      await prisma.eventComment.deleteMany({ where: { eventId: { in: [past.id, inProgress.id] } } });
       await prisma.event.deleteMany({ where: { id: { in: [past.id, inProgress.id] } } });
     }
   });
@@ -192,6 +194,7 @@ describe("admin single-event CRUD", () => {
       );
       expect(patchRes.status).toBe(400);
 
+      await prisma.eventComment.deleteMany({ where: { eventId: { in: [created.id, other.id] } } });
       await prisma.event.deleteMany({ where: { id: { in: [created.id, other.id] } } });
     } finally {
       await prisma.group.update({ where: { id: groupId }, data: { waiverContent: null, waiverVersion: null } });

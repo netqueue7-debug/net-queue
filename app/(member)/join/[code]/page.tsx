@@ -7,15 +7,18 @@ import { InvalidJoinCodeError, GroupMemberLimitReachedError } from "@/lib/groups
 
 // Single entry point for both a brand-new phone number and an
 // already-registered one (docs/phase-0b-groups.md) — an unauthenticated or
-// not-yet-onboarded visitor is bounced through login/onboarding with `next`
+// not-yet-onboarded visitor is bounced through signup/onboarding with `next`
 // pointing right back here, so the join itself only ever runs once the
-// visitor is a real, onboarded member.
+// visitor is a real, onboarded member. Goes to /signup, not /login: a
+// shared invite link is mostly clicked by people who don't have an account
+// yet, and /signup already handles an existing member clicking it too
+// (shows a "you already have an account" notice instead of blocking them).
 export default async function JoinPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = await params;
   const user = await getSession();
   const here = `/join/${code}`;
 
-  if (!user) redirect(`/login?next=${encodeURIComponent(here)}`);
+  if (!user) redirect(`/signup?next=${encodeURIComponent(here)}`);
   if (needsOnboarding(user)) redirect(`/onboarding?next=${encodeURIComponent(here)}`);
 
   let result: JoinResult | null = null;

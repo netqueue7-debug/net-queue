@@ -145,7 +145,7 @@ function renderPushPayload(type: NotificationType, payload: any, eventId: string
 export async function dispatchNotification(notificationId: string): Promise<void> {
   const notification = await prisma.notification.findUnique({
     where: { id: notificationId },
-    include: { user: { select: { phone: true } } },
+    include: { user: { select: { phone: true, smsOptedOutAt: true } } },
   });
   if (!notification) return;
 
@@ -162,6 +162,18 @@ export async function dispatchNotification(notificationId: string): Promise<void
   // Already sent (or the row vanished) — dispatching again must be a no-op,
   // which is what makes "a retry never double-texts" true by construction.
   if (notification.status === "sent") return;
+
+  // Twilio would silently drop this anyway once a STOP reply is on file,
+  // but skipping it here avoids burning retry attempts against a send that
+  // can never succeed, and leaves a clear reason on the row instead of a
+  // generic Twilio error.
+  if (notification.channel === "sms" && notification.user.smsOptedOutAt) {
+    await prisma.notification.update({
+      where: { id: notification.id },
+      data: { status: "failed", lastError: "recipient opted out of SMS" },
+    });
+    return;
+  }
 
   try {
     if (notification.channel === "sms") {

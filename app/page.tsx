@@ -14,12 +14,20 @@ export default async function RootPage() {
             <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent text-sm font-bold text-accent-foreground">N</span>
             NetQueue
           </span>
-          <Link
-            href="/login"
-            className="inline-flex items-center justify-center rounded-full border border-border px-4 py-1.5 text-sm font-medium hover:bg-foreground/5"
-          >
-            Log in
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/login"
+              className="inline-flex items-center justify-center rounded-full border border-border px-4 py-1.5 text-sm font-medium hover:bg-foreground/5"
+            >
+              Log in
+            </Link>
+            <Link
+              href="/signup"
+              className="inline-flex items-center justify-center rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-accent-foreground hover:opacity-90"
+            >
+              Sign up
+            </Link>
+          </div>
         </div>
       </header>
 
@@ -37,7 +45,7 @@ export default async function RootPage() {
           </p>
           <div className="flex flex-col items-center gap-3">
             <Link
-              href="/login"
+              href="/signup"
               className="inline-flex items-center justify-center rounded-full bg-accent px-6 py-3 text-base font-medium text-accent-foreground hover:opacity-90"
             >
               Get started

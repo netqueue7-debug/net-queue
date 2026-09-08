@@ -146,6 +146,17 @@ model User {
   role             Role      @default(member)
   bannedAt         DateTime? @map("banned_at")
   createdAt        DateTime  @default(now()) @map("created_at")
+  // SMS program consent (TCR/A2P 10DLC) — captured at the phone-entry step
+  // of /login, persisted on first successful OTP verification. Null means
+  // never consented (pre-dates this field, or somehow reached verify
+  // without it — see app/api/auth/otp/verify/route.ts).
+  smsConsentAt      DateTime? @map("sms_consent_at")
+  smsConsentVersion Int?      @map("sms_consent_version")
+  // Set when Twilio's inbound webhook sees a STOP-family reply, cleared on
+  // a START-family reply or a fresh explicit re-consent at login. While
+  // set, the login flow must collect consent again before the next OTP
+  // send (app/api/auth/otp/send/route.ts) — see lib/auth/sms-consent.ts.
+  smsOptedOutAt     DateTime? @map("sms_opted_out_at")
 
   waiverSignatures WaiverSignature[]
   eventLogEntries  EventLog[]

@@ -21,6 +21,7 @@ describe("createRsvp", () => {
 
   afterAll(async () => {
     await prisma.rsvp.deleteMany({ where: { userId: adminId } });
+    await prisma.eventComment.deleteMany({ where: { event: { createdBy: adminId } } });
     await prisma.event.deleteMany({ where: { createdBy: adminId } });
     await deleteTestGroup(groupId);
     await prisma.user.deleteMany({ where: { phone: adminPhone } });

@@ -105,6 +105,22 @@ describe("notifications dispatcher", () => {
     expect(result.attempts).toBe(5);
   });
 
+  it("dispatch: an SMS to an opted-out user is marked failed without calling Twilio", async () => {
+    await prisma.user.update({ where: { id: userId }, data: { smsOptedOutAt: new Date() } });
+    const notification = await prisma.notification.create({
+      data: { userId, type: "rsvp_promoted", channel: "sms", payload: { eventTitle: "X" } },
+    });
+
+    await dispatchNotification(notification.id);
+
+    expect(sendSmsMock).not.toHaveBeenCalled();
+    const result = await prisma.notification.findUniqueOrThrow({ where: { id: notification.id } });
+    expect(result.status).toBe("failed");
+    expect(result.lastError).toContain("opted out");
+
+    await prisma.user.update({ where: { id: userId }, data: { smsOptedOutAt: null } });
+  });
+
   it("retry sweep only re-attempts pending rows old enough to not race an in-flight dispatch", async () => {
     sendSmsMock.mockResolvedValue(undefined);
     const freshlyCreated = await prisma.notification.create({

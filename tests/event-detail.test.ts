@@ -48,6 +48,7 @@ describe("getEventDetail", () => {
   afterAll(async () => {
     await prisma.notification.deleteMany({ where: { eventId } });
     await prisma.rsvp.deleteMany({ where: { eventId } });
+    await prisma.eventComment.deleteMany({ where: { eventId } });
     await prisma.event.deleteMany({ where: { id: eventId } });
     await deleteTestGroup(groupId);
     await prisma.user.deleteMany({ where: { phone: { in: [adminPhone, memberPhone] } } });
@@ -59,7 +60,9 @@ describe("getEventDetail", () => {
     expect(detail?.going[0].userId).toBe(adminId);
     expect(detail?.waitlist).toHaveLength(1);
     expect(detail?.waitlist[0].userId).toBe(memberId);
-    expect(detail?.yourRsvp).toEqual({ status: "waitlist", queuePosition: 2 });
+    // Sole waitlisted party is #1 *within the waitlist*, not #2 in the
+    // event's global queue (which would count the admin who's going).
+    expect(detail?.yourRsvp).toEqual({ status: "waitlist", queuePosition: 1 });
   });
 
   it("never includes phone numbers, for a member or an admin viewer", async () => {
@@ -114,6 +117,7 @@ describe("getEventDetail", () => {
       const adminDetail = await getEventDetail(seriesEvent.id, { id: adminId });
       expect(adminDetail?.series).toEqual({ id: series.id, weekdays: [2, 4] });
     } finally {
+      await prisma.eventComment.deleteMany({ where: { eventId: seriesEvent.id } });
       await prisma.event.deleteMany({ where: { id: seriesEvent.id } });
       await prisma.eventSeries.deleteMany({ where: { id: series.id } });
     }

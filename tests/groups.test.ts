@@ -55,6 +55,7 @@ describe("groups", () => {
     await prisma.eventLog.deleteMany({ where: { actorUserId: { in: userIds } } });
     await prisma.notification.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.rsvp.deleteMany({ where: { userId: { in: userIds } } });
+    await prisma.eventComment.deleteMany({ where: { event: { createdBy: { in: userIds } } } });
     await prisma.event.deleteMany({ where: { createdBy: { in: userIds } } });
     await prisma.groupMembership.deleteMany({ where: { groupId: { in: groupIds } } });
     await prisma.group.deleteMany({ where: { id: { in: groupIds } } });

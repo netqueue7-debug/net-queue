@@ -18,6 +18,7 @@ describe("signup-open gating", () => {
 
   afterAll(async () => {
     await prisma.rsvp.deleteMany({ where: { userId } });
+    await prisma.eventComment.deleteMany({ where: { event: { createdBy: userId } } });
     await prisma.event.deleteMany({ where: { createdBy: userId } });
     await deleteTestGroup(groupId);
     await prisma.user.deleteMany({ where: { phone } });
