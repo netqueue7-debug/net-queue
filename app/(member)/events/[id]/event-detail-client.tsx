@@ -14,6 +14,11 @@ import { GROUP_CHIP_CLASS, GROUP_DOT_CLASS, groupColorTone } from "@/components/
 import { EventComments } from "./event-comments";
 import { EventAdminMenu } from "./event-admin-menu";
 
+// Matches GroupWaiverNotAcceptedError's message (lib/rsvp/errors.ts) so the
+// RSVP error can offer a direct link to accept the waiver instead of just
+// telling the member to go find it.
+const GROUP_WAIVER_NOT_ACCEPTED_MESSAGE = "You need to accept this group's waiver before RSVPing.";
+
 // End time only repeats the full date when it actually falls on a
 // different calendar day in the event's own timezone (rare, but the
 // schema doesn't forbid it for one-off events) — otherwise just the time,
@@ -194,7 +199,19 @@ export function EventDetailClient({
         {!signupOpen && <p className="text-sm text-muted">Signup opens {formatDateTime(event.signupOpensAt, event.timezone)}</p>}
       </div>
 
-      {error && <ErrorText>{error}</ErrorText>}
+      {error && (
+        <ErrorText>
+          {error}
+          {error === GROUP_WAIVER_NOT_ACCEPTED_MESSAGE && (
+            <>
+              {" "}
+              <Link href={`/groups/${group.id}/waiver`} className="underline">
+                Accept the waiver
+              </Link>
+            </>
+          )}
+        </ErrorText>
+      )}
 
       <div>
         <p className="text-sm font-semibold">{shownLocation ?? "Location TBD"}</p>
