@@ -12,9 +12,9 @@ Browser (React)
         ├── events/        CRUD, recurrence, capacity, reveal policy — all group-scoped
         ├── rsvp/          queue engine — THE critical section
         ├── waivers/       group-scoped acceptance records, tokenized guest links
-        ├── notifications/ SMS on promotion, approval, cancellation
+        ├── notifications/ in-app on promotion, approval, cancellation (+ web push mirror)
         └── jobs/          cron: materialize series, reveals, reminders
-   └── PostgreSQL · Twilio Verify + SMS
+   └── PostgreSQL · Twilio Verify (OTP login only)
 ```
 
 ## Groups & tenancy
@@ -146,4 +146,4 @@ Public: `GET /waiver/:token` · `POST /waiver/:token/sign` (guest waivers — si
 
 **Privacy.** Members see display names only. Phone numbers are never surfaced on any RSVP/event/membership list, including to admins — an admin who needs to reach someone does so through the app's own notification channel, not by looking up a number. (The admin's own phone-based OTP flows, and a member's own number on their own `/settings` page, are unaffected — this rule is about *other people's* numbers.) A group's existence, membership list, and events are invisible to anyone without an active membership in it.
 
-**Notifications.** SMS only for the moments that matter (waitlist promotion, event canceled). Everything else in-app, to control Twilio cost. Promotion SMS must be idempotent and best-effort — a failed send never rolls back the queue mutation. Web push (added 2026-09-03) is a third, opt-in channel layered on top of `in_app` specifically — every in-app notification also pushes to a user's subscribed browsers/devices, independent of and never gating the in-app row's own `status`. Unlike SMS, push is not cost-constrained to "moments that matter," since it's free and user-controlled (opt-in per device, unsubscribe any time).
+**Notifications.** Everything is in-app now (retired the SMS "moments that matter" tier — waitlist promotion/demotion, event canceled/updated — 2026-09-08; `TWILIO_MESSAGING_SERVICE_SID` was never even configured, so none of those texts had actually gone out). A promotion/demotion notification must still be idempotent and best-effort — a failed dispatch (of its web-push mirror) never rolls back the queue mutation. The `sms` channel value and its retry/opt-out machinery stay in the code only to drain rows an older deploy already enqueued; nothing new is ever created with it. This is unrelated to login OTP, which stays on Twilio Verify — a separate product/config. Web push (added 2026-09-03) is a third, opt-in channel layered on top of `in_app` — every in-app notification also pushes to a user's subscribed browsers/devices, independent of and never gating the in-app row's own `status`.
