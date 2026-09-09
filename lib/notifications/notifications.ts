@@ -3,10 +3,6 @@ import { sendSms, SmsSendError } from "./sms";
 import { sendPushToUser, type PushPayload } from "./push";
 import type { Notification, NotificationType, NotificationChannel, Prisma } from "@/lib/generated/prisma/client";
 
-// The SMS "moments that matter" — kept short to control Twilio cost
-// (architecture.md#notifications). Every other type is in-app only.
-const SMS_TYPES = new Set<NotificationType>(["rsvp_promoted", "rsvp_demoted", "event_canceled", "event_updated"]);
-
 const MAX_ATTEMPTS = 5;
 
 export interface EnqueueInput {
@@ -16,30 +12,36 @@ export interface EnqueueInput {
   payload: Record<string, unknown>;
 }
 
-// Enqueue inside the caller's transaction (e.g. withEventLock's callback) —
-// for `sms`, actual sending is dispatched only after commit, never inside
-// it (architecture.md's "Promotion SMS must be idempotent and best-effort
-// — a failed send never rolls back the queue mutation," satisfied by
-// construction: dispatch runs entirely outside the transaction that
-// created this row). `in_app` types have no external delivery step at all
-// — the row *is* the notification — so they're stamped `sent` immediately
-// and callers never need to dispatch them.
+// Enqueued inside the caller's transaction (e.g. withEventLock's callback)
+// so the row is part of the same atomic mutation. Every type is `in_app`
+// now — SMS (via Twilio's Messages API) was retired for cost and reliability
+// reasons; `TWILIO_MESSAGING_SERVICE_SID` was never even configured in any
+// environment, so no promotion/demotion/cancellation/update text has ever
+// actually gone out (docs/notifications-manifest.md). This is unrelated to
+// login OTP, which uses Twilio Verify — a separate product/config
+// (lib/auth/otp.ts) untouched by this. The `sms` channel value and the
+// dispatch/retry machinery below stay in place only to drain any rows an
+// older deploy already enqueued; nothing new is ever created with it.
+// `in_app` types have no external delivery step at all — the row *is* the
+// notification — so they're stamped `sent` immediately and callers never
+// need to dispatch them for that reason (they still call dispatch to fire
+// the best-effort web-push mirror).
 //
-// Deliberately no dedupe check here for SMS/most types — a second
-// occurrence of the same (user, event, type) over time (re-promoted after
-// a cancel/resignup, a second guest approved for the same host) is a real,
-// distinct event and deserves its own row. Cron-driven types dedupe
-// themselves before calling this — see lib/notifications/jobs.ts.
+// Deliberately no dedupe check here — a second occurrence of the same
+// (user, event, type) over time (re-promoted after a cancel/resignup, a
+// second guest approved for the same host) is a real, distinct event and
+// deserves its own row. Cron-driven types dedupe themselves before calling
+// this — see lib/notifications/jobs.ts.
 export function enqueueNotification(tx: Prisma.TransactionClient, input: EnqueueInput): Promise<Notification> {
-  const channel: NotificationChannel = SMS_TYPES.has(input.type) ? "sms" : "in_app";
   return tx.notification.create({
     data: {
       userId: input.userId,
       eventId: input.eventId,
       type: input.type,
-      channel,
+      channel: "in_app" satisfies NotificationChannel,
       payload: input.payload as Prisma.InputJsonValue,
-      ...(channel === "in_app" ? { status: "sent" as const, sentAt: new Date() } : {}),
+      status: "sent",
+      sentAt: new Date(),
     },
   });
 }
@@ -89,7 +91,28 @@ function renderPushPayload(type: NotificationType, payload: any, eventId: string
         ? `/groups/${payload.groupId}/about`
         : "/notifications";
 
+  const when = payload.startsAt && payload.timezone ? formatLocal(payload.startsAt, payload.timezone) : "";
+
   switch (type) {
+    case "rsvp_promoted":
+      return { title: "You're in!", body: `You're in for ${payload.eventTitle} (${when}).`, url };
+    case "rsvp_demoted":
+      return {
+        title: "Moved to waitlist",
+        body: `You've been moved to the waitlist for ${payload.eventTitle} (${when}) — sorry about that.`,
+        url,
+      };
+    case "event_canceled":
+      return { title: "Event canceled", body: `${payload.eventTitle} (${when}) has been canceled.`, url };
+    case "event_updated": {
+      // Never repeats the new address here — exactLocation is still subject
+      // to its own reveal-timing gate (architecture.md#location-gating),
+      // and this must not become a side channel around it.
+      const bits: string[] = [];
+      if (payload.timeChanged) bits.push(`new time ${when}`);
+      if (payload.locationChanged) bits.push("location changed");
+      return { title: "Event updated", body: `${payload.eventTitle} updated (${bits.join(", ")}).`, url };
+    }
     case "guest_approved":
       return { title: "Guest approved", body: `${payload.guestName ?? "Your guest"} was approved.`, url };
     case "guest_rejected":

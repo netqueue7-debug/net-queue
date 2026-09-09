@@ -45,18 +45,18 @@ describe("notifications dispatcher", () => {
     await prisma.user.deleteMany({ where: { id: userId } });
   });
 
-  it("enqueues an SMS notification as pending, and an in-app one as already sent", async () => {
-    const [sms, inApp] = await prisma.$transaction(async (tx) => {
-      const s = await enqueueNotification(tx, { userId, eventId: null, type: "rsvp_promoted", payload: { eventTitle: "X" } });
-      const i = await enqueueNotification(tx, { userId, eventId: null, type: "guest_approved", payload: { guestName: "Y" } });
-      return [s, i];
+  it("enqueues every notification type as in-app, already sent", async () => {
+    const [promoted, guestApproved] = await prisma.$transaction(async (tx) => {
+      const p = await enqueueNotification(tx, { userId, eventId: null, type: "rsvp_promoted", payload: { eventTitle: "X" } });
+      const g = await enqueueNotification(tx, { userId, eventId: null, type: "guest_approved", payload: { guestName: "Y" } });
+      return [p, g];
     });
 
-    expect(sms.channel).toBe("sms");
-    expect(sms.status).toBe("pending");
-    expect(inApp.channel).toBe("in_app");
-    expect(inApp.status).toBe("sent");
-    expect(inApp.sentAt).not.toBeNull();
+    for (const n of [promoted, guestApproved]) {
+      expect(n.channel).toBe("in_app");
+      expect(n.status).toBe("sent");
+      expect(n.sentAt).not.toBeNull();
+    }
   });
 
   it("dispatch: a successful send marks the row sent, and re-dispatching it is a no-op (idempotent)", async () => {
@@ -215,8 +215,13 @@ describe("notifications dispatcher", () => {
     await prisma.notification.deleteMany({ where: { userId } }); // isolate from earlier tests in this file
 
     await prisma.$transaction(async (tx) => {
-      await enqueueNotification(tx, { userId, eventId: null, type: "guest_approved", payload: { guestName: "A" } }); // in_app
-      await enqueueNotification(tx, { userId, eventId: null, type: "rsvp_promoted", payload: { eventTitle: "X" } }); // sms
+      await enqueueNotification(tx, { userId, eventId: null, type: "guest_approved", payload: { guestName: "A" } });
+    });
+    // No code path creates `sms` rows anymore (enqueueNotification is
+    // always in_app now) — this row stands in for one an older deploy
+    // already enqueued, to prove clearNotifications still leaves it alone.
+    await prisma.notification.create({
+      data: { userId, type: "rsvp_promoted", channel: "sms", payload: { eventTitle: "X" } },
     });
     expect(await prisma.notification.count({ where: { userId } })).toBe(2);
 

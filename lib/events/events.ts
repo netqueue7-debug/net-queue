@@ -74,13 +74,13 @@ export function listEventsForSeries(seriesId: string): Promise<Event[]> {
 
 // Detects a change to the event's own schedule or location (distinct from
 // capacity, which has its own boundary-recompute path below) and, if
-// anything actually moved, logs it and SMS-notifies every still-active
-// RSVP holder — going *and* waitlist, same scope as cancelEvent, since a
+// anything actually moved, logs it and notifies every still-active RSVP
+// holder — going *and* waitlist, same scope as cancelEvent, since a
 // waitlisted person still cares where/when the event they're queued for
-// is. The SMS body (lib/notifications/notifications.ts#renderSmsBody)
-// deliberately never repeats the new address — exactLocation is still
-// subject to its own reveal-timing gate (architecture.md#location-gating)
-// and this must not become a side channel around it.
+// is. The rendered body (lib/notifications/notifications.ts) deliberately
+// never repeats the new address — exactLocation is still subject to its
+// own reveal-timing gate (architecture.md#location-gating) and this must
+// not become a side channel around it.
 async function notifyIfRescheduledOrRelocated(
   tx: Prisma.TransactionClient,
   eventId: string,
@@ -169,9 +169,9 @@ export async function updateEvent(
               },
             });
 
-            // In-app only (docs/phase-3-polish.md) — separate from, and on
-            // top of, whatever rsvp_promoted/rsvp_demoted SMS this same
-            // capacity change triggers via withEventLock's own boundary diff.
+            // Separate from, and on top of, whatever rsvp_promoted/
+            // rsvp_demoted notification this same capacity change triggers
+            // via withEventLock's own boundary diff.
             const activeRsvps = await tx.rsvp.findMany({ where: { eventId: id, status: "active" }, select: { userId: true } });
             for (const rsvp of activeRsvps) {
               const notification = await enqueueNotification(tx, {
@@ -206,8 +206,8 @@ export async function updateEvent(
 // withEventLock's per-event row lock the way a capacity change does. It
 // does need to notify everyone still active (going *and* waitlist) —
 // phase-2-recurrence-guests.md's cancellation task — since from their
-// point of view the event they were queued for no longer exists. SMS
-// notifications are enqueued inside the same transaction as the
+// point of view the event they were queued for no longer exists.
+// Notifications are enqueued inside the same transaction as the
 // cancellation (so they're part of one atomic mutation) and dispatched
 // only after it commits — see lib/notifications/notifications.ts.
 export async function cancelEvent(id: string, actorUserId?: string): Promise<Event> {

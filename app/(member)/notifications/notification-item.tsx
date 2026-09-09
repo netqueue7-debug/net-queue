@@ -9,7 +9,23 @@ import { Button } from "@/components/ui/button";
 
 function describe(n: InAppNotification): string {
   const payload = n.payload as Record<string, unknown>;
+  const when =
+    typeof payload.startsAt === "string" && typeof payload.timezone === "string"
+      ? formatDateTime(payload.startsAt, payload.timezone)
+      : "";
   switch (n.type) {
+    case "rsvp_promoted":
+      return `You're in for ${payload.eventTitle} (${when}).`;
+    case "rsvp_demoted":
+      return `You've been moved to the waitlist for ${payload.eventTitle} (${when}) — sorry about that.`;
+    case "event_canceled":
+      return `${payload.eventTitle} (${when}) has been canceled.`;
+    case "event_updated": {
+      const bits: string[] = [];
+      if (payload.timeChanged) bits.push(`new time ${when}`);
+      if (payload.locationChanged) bits.push("location changed");
+      return `${payload.eventTitle} updated (${bits.join(", ")}).`;
+    }
     case "guest_approved":
       return `${payload.guestName ?? "Your guest"} was approved.`;
     case "guest_rejected":
